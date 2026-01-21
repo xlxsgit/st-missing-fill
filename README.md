@@ -23,6 +23,7 @@
 
 ```bash
 uv add requests pandas matplotlib seaborn numpy scipy tqdm \
-jupyter notebook ipykernel scikit-learn statsmodels openpyxl xlrd torch torchvision
+jupyter notebook ipykernel scikit-learn statsmodels openpyxl xlrd torch torchvision \
+pyarrow fastparquet
 
 ```
