@@ -1,0 +1,4 @@
+# path: config.yaml
+paths:
+  data_folder: data/meteo-swiss-data
+  data_desc_folder: data/meteo-swiss-description
