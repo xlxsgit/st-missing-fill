@@ -2,3 +2,4 @@
 paths:
   data_folder: data/meteo-swiss-data
   data_desc_folder: data/meteo-swiss-description
+  save_data_folder: data/processed-data
