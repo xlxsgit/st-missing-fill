@@ -1,28 +1,30 @@
 # st-missing-fill
 
-## 项目结构
+A Python project for filling missing values in time series data using statistical methods and machine learning techniques.
 
-```angular2html
-.
-├── README.md
-├── data
-├── main.py
-├── model
-├── pyproject.toml
-├── src
-│   └── core
-├── tests
-└── uv.lock
-```
+---
 
-## 配置信息
-- 使用设备：MacBook Air M4, 24GB RAM
-- 虚拟环境管理工具：uv
-- Python 版本：3.12
-- 依赖文件：[pyproject.toml](pyproject.toml), [uv.lock](uv.lock)
+## 1. 🗃️ DATA SOURCE
+
+The dataset is downloaded from Hugging Face: [MeteoSwiss/PeakWeather](https://huggingface.co/datasets/MeteoSwiss/PeakWeather/tree/main)
+
+---
+
+## 2. ⚙️ CONFIGURATION
+
+- **OS**: macOS Tahoe 26.2  
+- **Hardware**: Apple Silicon M4, CPU 10 cores, GPU 10 cores, 24GB RAM  
+- **Python version**: 3.12  
+- **Virtual environment tool**: `uv`  
+- **Dependency files**: [`pyproject.toml`](pyproject.toml), [`uv.lock`](uv.lock)
 
 ```bash
-uv add requests pandas matplotlib seaborn numpy scipy tqdm \
-jupyter notebook ipykernel scikit-learn statsmodels openpyxl xlrd torch torchvision
-
+uv add \
+        tqdm pyyaml \
+        jupyter notebook ipykernel \
+        openpyxl xlrd pyarrow fastparquet \
+        numpy pandas scipy \
+        matplotlib seaborn \
+        scikit-learn statsmodels \
+        torch torchvision
 ```

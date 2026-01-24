@@ -18,3 +18,5 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Mac
+.DS_Store
