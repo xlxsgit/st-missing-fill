@@ -6,8 +6,10 @@
 .python-version
 
 # 配置文件
+docker/
 .ini
 .yaml
+.dockerignore
 
 # 数据
 data/
