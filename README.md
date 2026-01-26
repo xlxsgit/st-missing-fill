@@ -24,7 +24,7 @@ uv add \
         jupyter notebook ipykernel \
         openpyxl xlrd pyarrow fastparquet \
         numpy pandas scipy \
-        matplotlib seaborn \
+        matplotlib seaborn folium\
         scikit-learn statsmodels \
         torch torchvision
 ```
