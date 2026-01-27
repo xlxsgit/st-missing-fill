@@ -28,3 +28,37 @@ uv add \
         scikit-learn statsmodels \
         torch torchvision
 ```
+
+---
+
+## 3. 🚀 WORKFLOW
+
+### Step 1: Configure Processing Parameters
+Edit `config.yaml` to set the data range you want to process:
+
+```yaml
+processing:
+  start_year: 2023
+  end_year: 2024
+```
+
+### Step 2: Run Data Processing
+Execute the processing script to merge data and generate variable-specific datasets in `data/processed-data/`.
+
+```bash
+uv run scripts/run_processing.py
+```
+
+### Step 3: Analyze Data (EDA)
+Open the EDA notebook to explore data distribution and quality.
+
+```bash
+uv run jupyter notebook tests/eda.ipynb
+```
+
+### Step 4: Validate Data Loading (Optional)
+Run the test notebook to verify data paths and station visualization.
+
+```bash
+uv run jupyter notebook tests/test.ipynb
+```

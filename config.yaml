@@ -3,3 +3,7 @@ paths:
   data_folder: data/meteo-swiss-data
   data_desc_folder: data/meteo-swiss-description
   save_data_folder: data/processed-data
+
+processing:
+  start_year: 2023
+  end_year: 2024
