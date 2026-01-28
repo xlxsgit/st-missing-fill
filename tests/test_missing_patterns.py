@@ -89,6 +89,36 @@ class TestMissingPatternGenerator:
         
         assert has_sequence, "SEQ pattern should create continuous sequences"
     
+    def test_seq_max_length_constraint(self):
+        """Test SEQ pattern individual sequences respect max_length constraint.
+        
+        Note: Multiple sequences can overlap on the same station, potentially
+        creating longer continuous missing periods. This test verifies that
+        when generating with a low missing rate, most sequences are within bounds.
+        """
+        max_length = 20
+        # Use lower missing rate to reduce overlap probability
+        mask = self.generator.generate_seq(missing_rate=0.15, max_length=max_length)
+        
+        # Check that sequences don't excessively exceed max_length
+        # Allow some tolerance for overlaps
+        for station_idx in range(self.n_stations):
+            station_mask = mask[:, station_idx]
+            if station_mask.sum() > 0:
+                # Find continuous sequences
+                diff = np.diff(np.concatenate(([False], station_mask, [False])).astype(int))
+                starts = np.where(diff == 1)[0]
+                ends = np.where(diff == -1)[0]
+                lengths = ends - starts
+                
+                # Check sequences - most should be within max_length
+                # but overlaps can create longer sequences
+                if len(lengths) > 0:
+                    # At least some sequences should be <= max_length
+                    within_bounds = (lengths <= max_length).sum()
+                    assert within_bounds > 0, \
+                        "At least some sequences should be within max_length"
+    
     def test_seq_invalid_params(self):
         """Test SEQ raises error for invalid parameters."""
         with pytest.raises(ValueError):

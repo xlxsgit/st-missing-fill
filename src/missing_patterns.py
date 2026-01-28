@@ -68,7 +68,8 @@ class MissingPatternGenerator:
         current_missing_count = 0
         
         # Keep adding sequences until we reach the target missing rate
-        max_attempts = target_missing_count * 10  # Prevent infinite loop
+        # Cap max_attempts to prevent performance issues with large datasets
+        max_attempts = min(target_missing_count * 10, 100000)
         attempt = 0
         
         while current_missing_count < target_missing_count and attempt < max_attempts:
@@ -79,6 +80,10 @@ class MissingPatternGenerator:
             
             # Randomly select sequence length from 1 to max_length
             seq_length = self.rng.randint(1, max_length + 1)
+            
+            # Truncate sequence length if it would exceed target
+            remaining = target_missing_count - current_missing_count
+            seq_length = min(seq_length, remaining)
             
             # Randomly select start position
             if self.n_timesteps > seq_length:
@@ -134,11 +139,23 @@ class MissingPatternGenerator:
         target_missing_count = int(missing_rate * self.n_timesteps * self.n_stations)
         current_missing_count = 0
         
-        max_attempts = target_missing_count * 10  # Prevent infinite loop
+        # Cap max_attempts to prevent performance issues with large datasets
+        max_attempts = min(target_missing_count * 10, 100000)
         attempt = 0
+        no_progress_count = 0  # Track attempts without progress
+        last_missing_count = 0
         
         while current_missing_count < target_missing_count and attempt < max_attempts:
             attempt += 1
+            
+            # Check for progress stagnation
+            if current_missing_count == last_missing_count:
+                no_progress_count += 1
+                if no_progress_count > 100:  # No progress for 100 consecutive attempts
+                    break
+            else:
+                no_progress_count = 0
+                last_missing_count = current_missing_count
             
             # Randomly select a seed station
             seed_station = self.rng.randint(0, self.n_stations)
@@ -147,9 +164,6 @@ class MissingPatternGenerator:
             neighbor_mask = distances[seed_station] <= distance_threshold
             neighbor_mask[seed_station] = True  # Include seed station itself
             neighbor_indices = np.where(neighbor_mask)[0]
-            
-            if len(neighbor_indices) == 0:
-                continue
             
             # Randomly select how many neighbors to affect
             min_neighbors, max_neighbors = n_neighbors_range
@@ -167,6 +181,15 @@ class MissingPatternGenerator:
             
             # Randomly select sequence length from 1 to max_length
             seq_length = self.rng.randint(1, max_length + 1)
+            
+            # Limit sequence length to avoid overshooting target
+            remaining = target_missing_count - current_missing_count
+            # Approximate remaining per affected station
+            max_seq_for_target = remaining // max(1, n_neighbors_to_affect)
+            seq_length = min(seq_length, max_seq_for_target, self.n_timesteps)
+            
+            if seq_length < 1:
+                break  # Not enough room for more sequences
             
             # Randomly select start position
             if self.n_timesteps > seq_length:
