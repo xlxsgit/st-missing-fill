@@ -22,3 +22,6 @@ __pycache__/
 
 # Mac
 .DS_Store
+
+# 其他
+old_codes/
