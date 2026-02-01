@@ -1,0 +1,9 @@
+# path: config.yaml
+paths:
+  raw_data_folder: data/raw/ts_data
+  geo_data_folder: data/raw/geo_data
+  processed_data_folder: data/processed
+
+processing:
+  start_year: 2023
+  end_year: 2024

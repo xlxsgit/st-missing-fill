@@ -8,13 +8,13 @@ if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
 from src.utils import load_config, setup_logger
-from src.processing import DataProcessor
+from src.data.processing import DataProcessor
 
 def main():
     logger = setup_logger('main')
     
     try:
-        config_path = project_root / 'config.yaml'
+        config_path = project_root / 'src' / 'config' / 'config.yaml'
         logger.info(f"Loading configuration from {config_path}")
         config = load_config(str(config_path))
         
