@@ -12,7 +12,7 @@ docker/
 .dockerignore
 
 # 数据
-data/
+/data/
 
 # 缓存文件
 __pycache__/
