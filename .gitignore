@@ -6,17 +6,23 @@
 .python-version
 
 # 配置文件
+docker/
 .ini
 .yaml
+.dockerignore
 
 # 数据
-data/
+/data/
 
 # 缓存文件
 __pycache__/
+.ipynb_checkpoints/
 *.pyc
 *.pyo
 *.pyd
 
 # Mac
 .DS_Store
+
+# 其他
+old_codes/

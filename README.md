@@ -24,7 +24,34 @@ uv add \
         jupyter notebook ipykernel \
         openpyxl xlrd pyarrow fastparquet \
         numpy pandas scipy \
-        matplotlib seaborn \
+        matplotlib seaborn folium\
         scikit-learn statsmodels \
         torch torchvision
+```
+
+---
+
+## 3. 🚀 WORKFLOW
+
+### Step 1: Configure Processing Parameters
+Edit `src/config/config.yaml` to set the data range you want to process:
+
+```yaml
+processing:
+  start_year: 2023
+  end_year: 2024
+```
+
+### Step 2: Run Data Processing
+Execute the processing script to merge data and generate a single consolidated dataset in `data/processed/all_data.parquet`.
+
+```bash
+uv run scripts/run_processing.py
+```
+
+### Step 3: Analyze Data (EDA)
+Open the notebooks to explore data distribution and quality.
+
+```bash
+uv run jupyter notebook notebooks/tmp.ipynb
 ```
