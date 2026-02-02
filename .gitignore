@@ -16,6 +16,7 @@ docker/
 
 # 缓存文件
 __pycache__/
+.ipynb_checkpoints/
 *.pyc
 *.pyo
 *.pyd
