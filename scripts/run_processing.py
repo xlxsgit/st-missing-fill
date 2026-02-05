@@ -20,6 +20,7 @@ def main():
         
         processor = DataProcessor(config)
         processor.process_and_save()
+        processor.generate_all_stations()
         
         logger.info("Data processing completed successfully.")
         
