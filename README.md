@@ -25,7 +25,7 @@ uv add \
         openpyxl xlrd pyarrow fastparquet \
         numpy pandas scipy \
         matplotlib seaborn folium\
-        scikit-learn statsmodels \
+        scikit-learn statsmodels pypots\
         torch torchvision
 ```
 
