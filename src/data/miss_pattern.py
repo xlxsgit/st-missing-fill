@@ -1,9 +1,25 @@
 import numpy as np
 
 
-def mask_seq(T, pi, n1, p1, L_obse_base, p0, seed=42):
+def mask_mcar(T=10000, pi=0.1, seed=42):
     '''
-    生成缺失掩码
+    生成MCAR缺失掩码
+
+    参数：
+    T: 序列总长度
+    pi: 目标缺失率
+    seed: 随机种子
+    
+    返回：
+    mask: 缺失掩码，0表示缺失，1表示非缺失
+    '''
+    np.random.seed(seed)
+    mask = np.random.choice([0, 1], size=T, p=[1-pi, pi])
+    return mask
+
+def mask_seq(T=10000, pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed=42):
+    '''
+    生成SEQ缺失掩码
     
     参数：
     T: 序列总长度
