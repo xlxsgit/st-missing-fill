@@ -107,3 +107,47 @@ class DataProcessor:
         save_path = self.processed_data_folder / 'all_data.parquet'
         df_merge.to_parquet(save_path)
         logger.info(f"Saved merged data to: {save_path.name}")
+
+    def generate_all_stations(self) -> None:
+        """Generate all_stations.csv from merged data and geo data."""
+        all_data_path = self.processed_data_folder / 'all_data.parquet'
+        stations_csv_path = self.geo_data_folder / 'stations.csv'
+        output_path = self.processed_data_folder / 'all_stations.csv'
+        
+        if not all_data_path.exists():
+            logger.error(f"all_data.parquet not found at {all_data_path}")
+            return
+        
+        if not stations_csv_path.exists():
+            logger.error(f"stations.csv not found at {stations_csv_path}")
+            return
+        
+        logger.info("Generating all_stations.csv...")
+        
+        df_all_data = pd.read_parquet(all_data_path)
+        stations = set([col.split('~')[0] for col in df_all_data.columns])
+        
+        df_stations = pd.read_csv(stations_csv_path)
+        
+        if 'station_name' in df_stations.columns:
+            del df_stations['station_name']
+        
+        df_stations = df_stations.loc[:, 
+                        ['nat_abbr', 'latitude', 'longitude', 'station_height', 'swiss_easting', 'swiss_northing', 'dem',
+                        'TPI_2000M', 'ASPECT_2000M_SIGRATIO1', 'SLOPE_2000M_SIGRATIO1', 'STD_2000M', 
+                        'WE_DERIVATIVE_2000M_SIGRATIO1', 'SN_DERIVATIVE_2000M_SIGRATIO1']]
+        
+        df_stations.columns = ['Station', 'Lat', 'Lon', 'Height', 'X', 'Y', 'Z',
+                        'TPI', 'ASPECT', 'SLOPE', 'STD', 
+                        'D_WE', 'D_SN']
+        
+        df_stations = df_stations[df_stations['Station'].isin(stations)]
+        # 按照 x y z kmeans聚类，将站点分为10类
+        from sklearn.cluster import KMeans
+        kmeans = KMeans(n_clusters=10, random_state=42)
+        df_stations['cluster'] = kmeans.fit_predict(df_stations[['X', 'Y', 'Z']])
+        df_stations = df_stations.sort_values(by='Station')
+        
+        df_stations.to_csv(output_path, index=False)
+        logger.info(f"Saved all_stations.csv to: {output_path}")
+    
