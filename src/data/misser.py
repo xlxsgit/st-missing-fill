@@ -3,14 +3,14 @@ import numpy as np
 # 缺失掩码，0表示缺失，1表示非缺失
 
 def mask_mcar(size = (112, 10000), pi=0.1, seed=42):
-    # missing at random
+    # Missing Completely at Random
     np.random.seed(seed)
     mask = np.random.choice([0, 1], size=size, p=[pi, 1-pi])
     return mask
 
 
 def mask_seq(size = (112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed=42):
-    # sequential missing
+    # Sequential Missing
     masks = np.zeros(size, dtype=int)
     for s in range(size[0]):
         masks[s] = mask_single_seq(
@@ -22,8 +22,8 @@ def mask_seq(size = (112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5,
     return masks
 
 
-def mask_spatial(S_cluster: list, size=(112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, pi_hat=0.95, seed=42):
-    # spatial missing
+def mask_scm(S_cluster: list, size=(112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, pi_hat=0.95, seed=42):
+    # Spatially Correlated Missing  
     masks = np.zeros(size, dtype=int)
     for s, cluster in enumerate(S_cluster):
         np.random.seed(seed + s)
@@ -57,5 +57,8 @@ def mask_single_seq(T=10000, pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed
     for i in range(k):
         mask[miss_idx+obse_blocks[i]:miss_idx+obse_blocks[i]+miss_blocks[i]] = 0
         miss_idx += obse_blocks[i] + miss_blocks[i]
+    # 随机找一个点分成两块，然后交换这两块
+    split_idx = np.random.randint(1, T-1)
+    mask = np.concatenate((mask[split_idx:], mask[:split_idx]))
     return mask
 

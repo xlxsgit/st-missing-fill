@@ -4,6 +4,42 @@ A Python project for filling missing values in time series data using statistica
 
 ---
 
+## PROJECT STRUCTURE
+
+```
+.
+├── README.md
+├── data # 数据
+│   ├── figs # 图片
+│   ├── processed # 处理后的数据
+│   └── raw
+│       ├── geo_data # 地理数据与变量描述
+│       └── ts_data # 原始时序数据
+├── docs # 文档
+│   ├── old_codes # 旧版代码（sci）
+│   ├── papers # 论文
+│   │   ├── 1-s2.0-S1364815225002488-main.pdf
+│   │   └── papar_of_data_source.pdf
+│   ├── 论文稿.docx # 论文稿（docx）
+│   └── 论文稿.pdf # 论文稿（pdf）
+├── logs  # 日志
+├── models  # 保存的模型
+├── notebooks  # 笔记本
+│   └── tmp.ipynb  # 临时笔记本
+├── pyproject.toml  # 项目依赖
+├── scripts  # 脚本
+├── src  # 源代码
+│   ├── config  # 配置
+│   │   └── config.yaml  # 全局配置文件
+│   ├── data  # 数据处理
+│   ├── features  # 特征工程
+│   ├── models  # 模型
+│   └── utils.py  # 工具函数
+├── tests  # 测试
+└── uv.lock  # 依赖锁文件
+```
+
+
 ## 1. 🗃️ DATA SOURCE
 
 The dataset is downloaded from Hugging Face: [MeteoSwiss/PeakWeather](https://huggingface.co/datasets/MeteoSwiss/PeakWeather/tree/main)
