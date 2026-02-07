@@ -146,7 +146,8 @@ class DataProcessor:
         from sklearn.cluster import KMeans
         kmeans = KMeans(n_clusters=10, random_state=42)
         df_stations['cluster'] = kmeans.fit_predict(df_stations[['X', 'Y', 'Z']])
-        df_stations = df_stations.sort_values(by='Station')
+        df_stations = df_stations.sort_values(by=['cluster', 'Station'])
+        df_stations = df_stations.reset_index(drop=True)
         
         df_stations.to_csv(output_path, index=False)
         logger.info(f"Saved all_stations.csv to: {output_path}")

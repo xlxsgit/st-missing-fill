@@ -2,19 +2,19 @@ import numpy as np
 
 # 缺失掩码，0表示缺失，1表示非缺失
 
-def mask_mcar(size = (112, 10000), pi=0.1, seed=42):
+def mcar_masker(shape = (112, 10000), pi=0.1, seed=42):
     # Missing Completely at Random
     np.random.seed(seed)
-    mask = np.random.choice([0, 1], size=size, p=[pi, 1-pi])
+    mask = np.random.choice([0, 1], size=shape, p=[pi, 1-pi])
     return mask
 
 
-def mask_seq(size = (112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed=42):
+def seq_masker(shape = (112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed=42):
     # Sequential Missing
-    masks = np.zeros(size, dtype=int)
-    for s in range(size[0]):
-        masks[s] = mask_single_seq(
-            T=size[1], pi=pi,
+    masks = np.zeros(shape, dtype=int)
+    for s in range(shape[0]):
+        masks[s] = single_seq_masker(
+            T=shape[1], pi=pi,
             n1=n1, p1=p1,
             L_obse_base=L_obse_base, p0=p0,
             seed=seed + s
@@ -22,14 +22,14 @@ def mask_seq(size = (112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5,
     return masks
 
 
-def mask_scm(S_cluster: list, size=(112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, pi_hat=0.95, seed=42):
+def scm_masker(S_cluster: list, shape=(112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, pi_hat=0.95, seed=42):
     # Spatially Correlated Missing  
-    masks = np.zeros(size, dtype=int)
+    masks = np.zeros(shape, dtype=int)
     for s, cluster in enumerate(S_cluster):
         np.random.seed(seed + s)
-        mask_base = np.random.choice([0, 1], size=size[1], p=[pi_hat, 1-pi_hat])
-        masks[s] = mask_base | mask_single_seq(
-            T=size[1], pi=pi,
+        mask_base = np.random.choice([0, 1], size=shape[1], p=[pi_hat, 1-pi_hat])
+        masks[s] = mask_base | single_seq_masker(
+            T=shape[1], pi=pi,
             n1=n1, p1=p1,
             L_obse_base=L_obse_base, p0=p0,
             seed=seed + cluster
@@ -37,7 +37,7 @@ def mask_scm(S_cluster: list, size=(112, 10000), pi=0.1, n1=24, p1=0.5, L_obse_b
     return masks
 
 
-def mask_single_seq(T=10000, pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed=42):
+def single_seq_masker(T=10000, pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed=42):
     # single sequential missing
     # 单个缺失块的长度服从binomial(n1, p1)，非缺失块的长度为 L_obse_base+服从binomial(n0, p0)
 
@@ -62,3 +62,5 @@ def mask_single_seq(T=10000, pi=0.1, n1=24, p1=0.5, L_obse_base=10, p0=0.5, seed
     mask = np.concatenate((mask[split_idx:], mask[:split_idx]))
     return mask
 
+def mask_mapping(mask, y): # 将掩码应用到实际值
+    return np.where(mask==1, y, np.nan)
