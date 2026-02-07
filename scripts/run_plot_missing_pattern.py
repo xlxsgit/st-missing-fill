@@ -56,5 +56,4 @@ def plot_missing_pattern():
     plot_miss_im(masked_list=[y_mcar, y_seq, y_scm])
 
 if __name__=='__main__':
-    print("Plotting missing pattern...")
     plot_missing_pattern()
