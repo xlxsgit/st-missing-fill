@@ -18,10 +18,6 @@ A Python project for filling missing values in time series data using statistica
 ├── docs # 文档
 │   ├── old_codes # 旧版代码（sci）
 │   ├── papers # 论文
-│   │   ├── 1-s2.0-S1364815225002488-main.pdf
-│   │   └── papar_of_data_source.pdf
-│   ├── 论文稿.docx # 论文稿（docx）
-│   └── 论文稿.pdf # 论文稿（pdf）
 ├── logs  # 日志
 ├── models  # 保存的模型
 ├── notebooks  # 笔记本
