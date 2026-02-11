@@ -16,8 +16,8 @@ flowchart TD
     F --> F2["Traditional: knn / mice (分块插补)"]
     F --> F3["Custom: src/models/vcaan.py"]
     B --> G["src/evaluate.py<br/>仅缺失位置 RMSE"]
-    B --> H["data/res/<run_id>/...<br/>train.log / results / config / metrics"]
-    B --> I["data/res/summary.csv<br/>最新实验汇总"]
+    B --> H["logs/<run_id>/...<br/>train.log / results / config / metrics"]
+    B --> I["logs/summary.csv<br/>最新实验汇总"]
     J["scripts/plot_baseline_compare.py"] --> K["src/visualization/baseline_compare.py"]
     K --> L["data/figs/baseline_compare/*.png"]
 ```
@@ -48,7 +48,7 @@ flowchart TD
 ├── data
 │   ├── raw                            # 原始数据
 │   ├── processed                      # all_data.parquet / all_stations.csv
-│   ├── res                            # 每次实验结果目录 + summary.csv
+│   ├── logs                           # 每次实验结果目录 + summary.csv
 │   └── figs                           # 可视化图像输出目录
 └── tests
     └── tmp.py                         # 暂不使用（占位）
@@ -136,7 +136,7 @@ uv run python scripts/plot_baseline_compare.py
 
 ## 5. 结果输出文件说明
 
-每次 run 会在 `data/res/<timestamp>_<run-name>/` 生成：
+每次 run 会在 `logs/<timestamp>_<run-name>/` 生成：
 - `train.log`：完整日志
 - `results_long.csv`：长表（model/pattern/pi/split）
 - `results_pivot.csv`：透视表（train/val/test）
@@ -144,7 +144,7 @@ uv run python scripts/plot_baseline_compare.py
 - `metrics.json`：指标摘要
 
 全局汇总：
-- `data/res/summary.csv`：最新 run 的汇总（浮点保留 4 位）
+- `logs/summary.csv`：最新 run 的汇总（浮点保留 4 位）
 
 ## 6. 注意事项
 

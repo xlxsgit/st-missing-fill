@@ -49,7 +49,7 @@ def _set_plot_style():
 
 
 def plot_baseline_comparison(
-    summary_csv: str | Path = "data/res/summary.csv",
+    summary_csv: str | Path = "logs/summary.csv",
     output_dir: str | Path = "data/figs/baseline_compare",
     run_id: str | None = None,
     annotate: bool = True,
@@ -130,4 +130,3 @@ def plot_baseline_comparison(
     out["rank_test"] = rank_path
 
     return out
-

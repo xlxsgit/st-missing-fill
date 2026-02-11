@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-windows", type=int, default=None)
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--quiet-train", action="store_true")
+    parser.add_argument("--knn-chunk-steps", type=int, default=1008)
+    parser.add_argument("--mice-chunk-steps", type=int, default=720)
+    parser.add_argument("--knn-neighbors", type=int, default=5)
+    parser.add_argument("--mice-max-iter", type=int, default=8)
+    parser.add_argument("--mice-tol", type=float, default=1e-3)
+    parser.add_argument("--mice-show-warnings", action="store_true")
     parser.add_argument("--seq-n1", type=int, default=24)
     parser.add_argument("--seq-p1", type=float, default=0.5)
     parser.add_argument("--seq-l-obse-base", type=int, default=10)
@@ -108,7 +114,7 @@ def run_experiments(args, project_root: Path) -> None:
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     if args.run_name:
         run_id = f"{run_id}_{args.run_name}"
-    run_dir = project_root / "data" / "res" / run_id
+    run_dir = project_root / "logs" / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     log_path = run_dir / "train.log"
 
@@ -157,7 +163,7 @@ def run_experiments(args, project_root: Path) -> None:
                             seq_params,
                             scm_params,
                         )
-                        rmse_by_split = run_baseline_on_splits(
+                        rmse_by_split, timing = run_baseline_on_splits(
                             model_name=model_name,
                             split_y=split_y,
                             split_masked=masked,
@@ -168,6 +174,12 @@ def run_experiments(args, project_root: Path) -> None:
                             batch_size=args.batch_size,
                             max_windows=args.max_windows,
                             verbose=not args.quiet_train,
+                            knn_chunk_steps=args.knn_chunk_steps,
+                            mice_chunk_steps=args.mice_chunk_steps,
+                            knn_neighbors=args.knn_neighbors,
+                            mice_max_iter=args.mice_max_iter,
+                            mice_tol=args.mice_tol,
+                            mice_quiet_warnings=not args.mice_show_warnings,
                         )
 
                         for split_name in ["train", "val", "test"]:
@@ -181,11 +193,18 @@ def run_experiments(args, project_root: Path) -> None:
                                     "missing_rate": float((masks[split_name] == 0).mean()),
                                     "combo_seed": combo_seed,
                                     "split_seed": split_seed[split_name],
+                                    "train_seconds": float(timing["train_seconds"]),
+                                    "infer_seconds": float(timing["infer_seconds"]),
+                                    "total_seconds": float(timing["total_seconds"]),
                                 }
                             )
                         print(
                             f"RMSE train/val/test: "
                             f"{rmse_by_split['train']:.4f}/{rmse_by_split['val']:.4f}/{rmse_by_split['test']:.4f}"
+                        )
+                        print(
+                            "Timing (s) train/infer/total: "
+                            f"{timing['train_seconds']:.3f}/{timing['infer_seconds']:.3f}/{timing['total_seconds']:.3f}"
                         )
 
             df = pd.DataFrame(rows)
@@ -205,8 +224,23 @@ def run_experiments(args, project_root: Path) -> None:
             pivot_csv = run_dir / "results_pivot.csv"
             pivot.to_csv(pivot_csv, index=False)
 
-            summary_csv = project_root / "data" / "res" / "summary.csv"
+            timing_pivot = (
+                df.groupby(["model", "pattern", "pi"], as_index=False)[
+                    ["train_seconds", "infer_seconds", "total_seconds"]
+                ]
+                .first()
+                .sort_values(["model", "pattern", "pi"])
+            )
+            timing_csv = run_dir / "timing_summary.csv"
+            timing_pivot.to_csv(timing_csv, index=False, float_format="%.4f")
+
+            summary_csv = project_root / "logs" / "summary.csv"
             summary_df = pivot.copy()
+            summary_df = summary_df.merge(
+                timing_pivot,
+                on=["model", "pattern", "pi"],
+                how="left",
+            )
             summary_df.insert(0, "run_id", run_id)
             summary_df.to_csv(summary_csv, index=False, float_format="%.4f")
 
@@ -251,5 +285,6 @@ def run_experiments(args, project_root: Path) -> None:
             print(f"\nSaved log: {log_path}")
             print(f"Saved long results: {result_csv}")
             print(f"Saved pivot results: {pivot_csv}")
+            print(f"Saved timing summary: {timing_csv}")
             print(f"Saved metrics: {metrics_json}")
             print(f"Updated summary: {summary_csv}")

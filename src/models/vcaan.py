@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
@@ -7,7 +8,8 @@ from src.evaluate import rmse_on_missing_2d
 
 def _safe_corrcoef(y_hat: np.ndarray) -> np.ndarray:
     # y_hat shape: (S, T)
-    c = np.corrcoef(y_hat)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        c = np.corrcoef(y_hat)
     c = np.nan_to_num(c, nan=0.0, posinf=0.0, neginf=0.0)
     np.fill_diagonal(c, 0.0)
     return c
@@ -90,13 +92,21 @@ def run_vcaan_on_splits(
     split_y: dict,
     split_masked: dict,
     split_masks: dict,
-) -> dict[str, float]:
+) -> tuple[dict[str, float], dict[str, float]]:
     # This is a practical VCAAN baseline adaptation:
-    # temporal-spatial iterative regression initialized by KNN imputation.
+    # temporal-spatial iterative regression initialized by LOCF prefill.
     res = {}
+    split_runtime = {}
     for split_name in ["train", "val", "test"]:
+        t0 = time.perf_counter()
         y_obs = split_masked[split_name][..., 0]
         mask = split_masks[split_name]
         y_hat = _vcaan_single(y_obs, mask)
         res[split_name] = rmse_on_missing_2d(y_hat, split_y[split_name], mask)
-    return res
+        split_runtime[split_name] = time.perf_counter() - t0
+    timing = {
+        "train_seconds": float(split_runtime["train"]),
+        "infer_seconds": float(split_runtime["val"] + split_runtime["test"]),
+        "total_seconds": float(sum(split_runtime.values())),
+    }
+    return res, timing
