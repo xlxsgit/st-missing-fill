@@ -1,22 +1,36 @@
 # st-missing-fill
 
 时序缺失构造与插补实验项目。  
-当前项目的核心原则是：`main.py` 只做入口调用，具体逻辑放在 `src/` 分层模块中。
+本项目的主旨是：建立一个高内聚、易扩展的模型测试实验台，**业务逻辑层层切割**。
 
-## 架构流程图
+## 核心架构与功能流转图
 
-```mermaid
-flowchart TD
-    A["run_experiments.sh / main.py"] --> B["src/experiments/runner.py"]
-    B --> C["src/data/load.py<br/>加载 ground_X / ground_y"]
-    B --> D["src/data/splitter.py<br/>时间切分 + 窗口化"]
-    B --> E["src/data/misser.py<br/>构造缺失 (mcar/seq/scm)"]
-    B --> F["src/models/dispatcher.py<br/>调度 baseline 与 HPO参数查找"]
-    F --> F1["PyPOTS: saits / grud / usgan / itransformer (结合 HPO)"]
-    F --> F2["Traditional: knn / mice / locf / vcaan"]
-    B --> H["logs/<run_id>/...<br/>长表 / 宽表 / config / metrics"]
-    B --> I["logs/summary_all_parts.csv<br/>所有最新实验汇总"]
-    B --> J["logs/latest<br/>快捷获取最新实验夹软链"]
+```text
+[用户层] 
+   ├─ run_experiments.sh       <-- 快捷启动脚本（暴露模型列表、时间切分、HPO配置等）
+   └─ main.py                  <-- 命令行解析入口（封装 argparse）
+            │
+            ▼
+[调度层: src/experiments/runner.py]
+   │  (它是整个实验的大群控，负责循环组合 [模型 x 缺失模式 x 缺失率])
+   ├─ 1. 加载源数据 ──> src/data/load.py
+   ├─ 2. 时间域切分 ──> src/data/splitter.py (按指令切成 train/val/test 及窗函数划窗)
+   ├─ 3. 施加随机破坏 ──> src/data/misser.py (支持 mcar 完全随机 / seq 连续缺失 / scm 空间相关缺失)
+   │
+   └─ 4. 派发模型集 ──> [分发器: src/models/dispatcher.py]
+            │          (包含 Optuna HPO 和最终推理)
+            │
+            ├─ 深度模型 ──> src/models/pypots_baselines.py (saits, grud, itransformer 等)
+            ├─ 传统基线 ──> src/models/sklearn_baselines.py (knn, mice, 内部包含了分段推理防 OOM)
+            ├─ 快速填补 ──> src/models/statistical_baselines.py (locf)
+            └─ 最新实验 ──> src/models/vcaan.py (基于关联的迭代基线)
+            │
+            ▼
+[持久层: src/experiments/results.py]
+   ├─ metrics.json         <-- 指标摘要
+   ├─ results_long.csv     <-- 展平的长数据表
+   ├─ summary_all_parts.csv<-- 全局累加总表（汇集每次实验最佳成绩）
+   └─ logs/latest/         <-- 热链，直达上一次运行产物
 ```
 
 ## 1. 项目组织结构
@@ -48,49 +62,36 @@ flowchart TD
 └── logs                               # 最新 run 的汇总目录 / 增量报表
 ```
 
-### 2.1 数据预处理阶段
-执行：
+## 2. 深入理解代码运作机制
 
-```bash
-uv run python scripts/run_processing.py
-```
+整个实验流水线设计为高度解耦，各司其职：
 
-作用：
-- 合并原始时序数据，生成 `data/processed/all_data.parquet`
-- 生成站点信息与 cluster：`data/processed/all_stations.csv`
+### 2.1 实验大盘编排器 (src/experiments/runner.py)
+最核心的文件，它就像一个总指挥，拿到外部脚本（`run_experiments.sh`）赋予的诸如“训练几月份到几月份”、“要哪些模型比对”的指令后，启动一个嵌套循环。
+在每次抵达一个诸如 `(model=saits, pattern=mcar, pi=0.1)` 的确定组合时，它会将源数据丢给底层的 `misser.py` 挖洞，然后唤起 `dispatcher.py` 求解。
 
-### 2.2 实验阶段（统一入口）
-执行：
+### 2.2 统一派发器与 HPO 超参寻优框架 (src/models/dispatcher.py)
+这是重构后新引入的关键模块。它的职能有两个：
+- **挂载 Optuna 框架进行自动调参 (HPO)**：如果外界指令 `--hpo-trials > 0`，派发器会去 `search_space.py` (内置了各个核心模型的最佳预留设定) 里抓取搜索边界。它会在 **验证集 (Val)** 上对该组合反复试错，直到找出最佳参数。
+- **派发推理**：若配置不包含 HPO 亦或 HPO 执行完毕，它会将带有最佳超参的任务抛掷给各自的真实算法基线进行落地的网络构建和拟合。
 
-```bash
-uv run python main.py [args...]
-```
-
-调用链：
-- `main.py` -> `src/experiments/runner.py`
-- runner 内部依次调用：
-  - `src/data/load.py` 加载 `ground_X/ground_y`
-  - `src/data/splitter.py` 按日期切 train/val/test
-  - `src/data/misser.py` 按模式与缺失率构造缺失
-  - `src/models/baselines.py` 运行指定 baseline
-  - `src/evaluate.py` 计算仅缺失位置 RMSE
-
-固定时间切分：
-- Train: `2023-01-01 00:00:00` ~ `2023-12-31 23:50:00`
-- Val: `2024-01-01 00:00:00` ~ `2024-06-30 23:50:00`
-- Test: `2024-07-01 00:00:00` ~ `2024-12-31 23:50:00`
+### 2.3 基线的隔离与防护机制
+为了保证不让庞杂的模型污染流程，当前算法分别被隔离装在了 `src/models/` 目录下：
+- **`pypots_baselines.py`**：集成了以 PyPOTS 为基础的所有深度学习模型。值得一提的是内含了专门的分块机制（chunking）和显存强制释放 `torch.mps.empty_cache()`，用于确保在强算压力下 MPS Mac 设备不会 Out-Of-Memory。
+- **`sklearn_baselines.py`**：应对传统机器学习插补方法 `knn` 以及 `mice`。特别是 `mice` 多重弥补，由于底层实现占用了巨大的内存运算通道，该文件内定制了特有的 `mice_chunk_steps` 滑动小窗机制强行规避资源死锁。
 
 ## 3. 当前支持模型与缺失模式
 
-### 3.1 Baselines
-- 深度模型（PyPOTS）：`saits`, `grud`, `usgan`, `itransformer`
-- 传统方法：`locf`, `knn`, `mice`
-- 自定义：`vcaan`
+### 3.1 Baselines (模型列阵)
+- **深度模型（基于 PyPOTS）**：`saits`, `grud`, `usgan`, `itransformer`
+- **传统插值模型**：`locf`, `knn`, `mice`
+- **自主构造基准**：`vcaan` (一种基于特征工程相关性辅助并结合迭代调优补全的模型)
 
-### 3.2 缺失模式
-- `mcar`
-- `seq`
-- `scm`
+### 3.2 缺失模式验证
+项目支持对源数据进行三种工业模拟级别的破坏：
+- `mcar` (完全独立随机缺失)
+- `seq` (连续时间切片状黑障缺失)
+- `scm` (引入基于站点强空间相关性的区块崩解)
 
 ## 4. 常用运行方式
 
