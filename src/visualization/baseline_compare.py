@@ -5,21 +5,14 @@ import pandas as pd
 import seaborn as sns
 
 
-def _load_and_prepare(summary_csv: Path, run_id: str | None):
-    if not summary_csv.exists():
-        raise FileNotFoundError(summary_csv)
-
-    df = pd.read_csv(summary_csv)
-    required_cols = {"run_id", "model", "pattern", "pi", "train", "val", "test"}
+def _load_and_prepare(df: pd.DataFrame):
+    required_cols = {"model", "pattern", "pi", "train", "val", "test"}
     missing = required_cols - set(df.columns)
     if missing:
-        raise ValueError(f"summary missing required columns: {sorted(missing)}")
+        raise ValueError(f"run dataframe missing required columns: {sorted(missing)}")
 
-    if run_id is None:
-        run_id = str(df["run_id"].iloc[-1])
-    df = df[df["run_id"] == run_id].copy()
     if df.empty:
-        raise ValueError(f"run_id={run_id} not found in {summary_csv}")
+        raise ValueError(f"run dataframe is empty")
 
     df["pattern"] = df["pattern"].str.upper()
     df["pi"] = df["pi"].astype(float)
@@ -31,7 +24,7 @@ def _load_and_prepare(summary_csv: Path, run_id: str | None):
     model_order = (
         df.groupby("model", as_index=True)["test"].mean().sort_values(ascending=True).index.tolist()
     )
-    return df, run_id, combo_order, model_order
+    return df, combo_order, model_order
 
 
 def _set_plot_style():
@@ -49,23 +42,22 @@ def _set_plot_style():
 
 
 def plot_baseline_comparison(
-    summary_csv: str | Path = "logs/summary.csv",
-    output_dir: str | Path = "data/figs/baseline_compare",
-    run_id: str | None = None,
+    summary_df: pd.DataFrame,
+    output_dir: str | Path,
+    run_id: str,
     annotate: bool = True,
     dpi: int = 350,
 ) -> dict[str, Path]:
-    """Generate concise, publication-style comparison figures.
+    """Generate concise, publication-style comparison figures directly inside a run_dir.
 
     Output:
     - One heatmap per split: train / val / test
     - One test-average ranking bar chart
     """
-    summary_csv = Path(summary_csv)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    df, run_id, combo_order, model_order = _load_and_prepare(summary_csv, run_id)
+    df, combo_order, model_order = _load_and_prepare(summary_df.copy())
     _set_plot_style()
 
     split_cols = ["train", "val", "test"]

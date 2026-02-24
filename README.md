@@ -7,54 +7,46 @@
 
 ```mermaid
 flowchart TD
-    A["main.py (CLI 入口)"] --> B["src/experiments/runner.py"]
+    A["run_experiments.sh / main.py"] --> B["src/experiments/runner.py"]
     B --> C["src/data/load.py<br/>加载 ground_X / ground_y"]
     B --> D["src/data/splitter.py<br/>时间切分 + 窗口化"]
     B --> E["src/data/misser.py<br/>构造缺失 (mcar/seq/scm)"]
-    B --> F["src/models/baselines.py<br/>调度 baseline"]
-    F --> F1["PyPOTS: saits / grud / usgan / itransformer / locf"]
-    F --> F2["Traditional: knn / mice (分块插补)"]
-    F --> F3["Custom: src/models/vcaan.py"]
-    B --> G["src/evaluate.py<br/>仅缺失位置 RMSE"]
-    B --> H["logs/<run_id>/...<br/>train.log / results / config / metrics"]
-    B --> I["logs/summary.csv<br/>最新实验汇总"]
-    J["scripts/plot_baseline_compare.py"] --> K["src/visualization/baseline_compare.py"]
-    K --> L["data/figs/baseline_compare/*.png"]
+    B --> F["src/models/dispatcher.py<br/>调度 baseline 与 HPO参数查找"]
+    F --> F1["PyPOTS: saits / grud / usgan / itransformer (结合 HPO)"]
+    F --> F2["Traditional: knn / mice / locf / vcaan"]
+    B --> H["logs/<run_id>/...<br/>长表 / 宽表 / config / metrics"]
+    B --> I["logs/summary_all_parts.csv<br/>所有最新实验汇总"]
+    B --> J["logs/latest<br/>快捷获取最新实验夹软链"]
 ```
 
 ## 1. 项目组织结构
 
 ```text
 .
-├── main.py                            # 统一入口（参数解析 + 调用实验 runner）
-├── scripts
-│   ├── run_processing.py              # 原始数据处理入口
-│   ├── plot_missing_pattern.py        # 缺失模式可视化
-│   └── plot_baseline_compare.py       # baseline 结果可视化入口
+├── main.py                            # 统一入口
+├── run_experiments.sh                 # 快捷启动跑批脚本（支持快速改配、改时间、挂载 HPO）
+├── pyproject.toml                     # 项目依赖清单
 ├── src
 │   ├── data
-│   │   ├── processing.py              # 原始数据清洗、合并、站点聚类
-│   │   ├── load.py                    # 读取 processed 数据
-│   │   ├── misser.py                  # 缺失构造（mcar/seq/scm）
-│   │   └── splitter.py                # 时间切分、窗口化
+│   │   ├── processing.py              # 数据清洗
+│   │   ├── load.py                    # 数据加载
+│   │   ├── misser.py                  # 缺失构造
+│   │   └── splitter.py                # 动态时间集切分
 │   ├── models
-│   │   ├── baselines.py               # baseline 模型统一调用
-│   │   └── vcaan.py                   # VCAAN baseline 实现
+│   │   ├── dispatcher.py              # 基线与优化统一派发器
+│   │   ├── search_space.py            # Optuna HPO 超参搜寻空间
+│   │   ├── pypots_baselines.py        # 深度学习基线
+│   │   ├── sklearn_baselines.py       # 机器学习基线 
+│   │   ├── statistical_baselines.py   # LOCF基线
+│   │   └── vcaan.py                   # VCAAN基线
 │   ├── experiments
-│   │   └── runner.py                  # 实验编排、训练评估、结果落盘
-│   ├── visualization
-│   │   └── baseline_compare.py        # 结果图生成函数
-│   └── evaluate.py                    # 评估函数（RMSE on missing positions）
+│   │   ├── runner.py                  # 实验大盘编排
+│   │   └── results.py                 # 分离的报表生成逻辑
+│   └── evaluate.py                    # 纯原位 RMSE 评估
 ├── data
-│   ├── raw                            # 原始数据
-│   ├── processed                      # all_data.parquet / all_stations.csv
-│   ├── logs                           # 每次实验结果目录 + summary.csv
-│   └── figs                           # 可视化图像输出目录
-└── tests
-    └── tmp.py                         # 暂不使用（占位）
+│   └── raw/processed                  # 隔离的数据资源
+└── logs                               # 最新 run 的汇总目录 / 增量报表
 ```
-
-## 2. 代码如何运作
 
 ### 2.1 数据预处理阶段
 执行：
@@ -100,45 +92,21 @@ uv run python main.py [args...]
 - `seq`
 - `scm`
 
-## 4. 常用运行命令
+## 4. 常用运行方式
 
-### 4.1 快速 smoke（建议先跑）
+我们已废弃了早期繁琐的组合命令或者手写长参数。当前全部参数均在入口脚本顶层暴露！
+
+**最推荐的运行方案：**
 ```bash
-uv run python main.py \
-  --models saits \
-  --patterns mcar \
-  --pis 0.1 \
-  --epochs 1 \
-  --batch-size 64 \
-  --max-windows 32 \
-  --run-name smoke
+./run_experiments.sh
 ```
-
-### 4.2 多模型 x 三缺失 x 三缺失率（0.1/0.3/0.5）
-```bash
-uv run python main.py \
-  --models locf,saits,grud,usgan,itransformer,knn,mice,vcaan \
-  --patterns mcar,seq,scm \
-  --pis 0.1,0.3,0.5 \
-  --epochs 1 \
-  --batch-size 64 \
-  --max-windows 32 \
-  --run-name all_models_3patterns_135
-```
-
-### 4.3 结果可视化（多图输出）
-```bash
-uv run python scripts/plot_baseline_compare.py
-```
-
-默认输出到：
-- `data/figs/baseline_compare/`
+你可以随意打该文件来修改执行配比。包括：支持运行多大范围的数据集（1月到3月等）、需要启动的基线（`locf`等）、以及最重要的：**是否开启带有超参数搜索优化的机制（`--hpo-trials`）**。
 
 ## 5. 结果输出文件说明
 
-每次 run 会在 `logs/<timestamp>_<run-name>/` 生成：
-- `train.log`：完整日志
-- `results_long.csv`：长表（model/pattern/pi/split）
+当启动任意测试后，除了将在 `logs/xxxxx_name/` 下属生成单独文件夹外，系统会：
+- 将全局的每次试验都递增写入统括表：`logs/summary_all_parts.csv`
+- 创建一个随跑随更新的快捷目录软交点：`logs/latest/`
 - `results_pivot.csv`：透视表（train/val/test）
 - `config.json`：配置快照
 - `metrics.json`：指标摘要

@@ -16,6 +16,12 @@ def load_time_index(project_root: Path) -> pd.DatetimeIndex:
 def split_by_datetime(
     ground_y: np.ndarray,
     time_index: pd.DatetimeIndex,
+    train_start: str = "2023-01-01",
+    train_end: str = "2023-01-31",
+    val_start: str = "2023-02-01",
+    val_end: str = "2023-02-28",
+    test_start: str = "2023-03-01",
+    test_end: str = "2023-03-31",
 ) -> dict[str, np.ndarray]:
     if ground_y.shape[1] != len(time_index):
         raise ValueError(
@@ -23,16 +29,26 @@ def split_by_datetime(
         )
 
     tz = time_index.tz if time_index.tz is not None else None
-    train_start = pd.Timestamp("2023-01-01 00:00:00", tz=tz)
-    train_end = pd.Timestamp("2023-12-31 23:50:00", tz=tz)
-    val_start = pd.Timestamp("2024-01-01 00:00:00", tz=tz)
-    val_end = pd.Timestamp("2024-06-30 23:50:00", tz=tz)
-    test_start = pd.Timestamp("2024-07-01 00:00:00", tz=tz)
-    test_end = pd.Timestamp("2024-12-31 23:50:00", tz=tz)
+    
+    # 支持 yyyy-mm-dd 等输入格式，添加当天截止时间 23:50:00 的宽容处理以防丢失末尾数据
+    def _parse_ts(ts_str: str, is_end: bool = False) -> pd.Timestamp:
+        ts = pd.Timestamp(ts_str, tz=tz)
+        if len(ts_str) <= 10 and is_end:
+            ts = ts.replace(hour=23, minute=50, second=0)
+        elif len(ts_str) <= 10 and not is_end:
+            ts = ts.replace(hour=0, minute=0, second=0)
+        return ts
 
-    m_train = (time_index >= train_start) & (time_index <= train_end)
-    m_val = (time_index >= val_start) & (time_index <= val_end)
-    m_test = (time_index >= test_start) & (time_index <= test_end)
+    ts_train_start = _parse_ts(train_start, False)
+    ts_train_end = _parse_ts(train_end, True)
+    ts_val_start = _parse_ts(val_start, False)
+    ts_val_end = _parse_ts(val_end, True)
+    ts_test_start = _parse_ts(test_start, False)
+    ts_test_end = _parse_ts(test_end, True)
+
+    m_train = (time_index >= ts_train_start) & (time_index <= ts_train_end)
+    m_val = (time_index >= ts_val_start) & (time_index <= ts_val_end)
+    m_test = (time_index >= ts_test_start) & (time_index <= ts_test_end)
     if (m_train.astype(int) + m_val.astype(int) + m_test.astype(int)).max() > 1:
         raise ValueError("Time split overlap detected")
 
