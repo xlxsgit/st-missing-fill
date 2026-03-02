@@ -17,18 +17,18 @@ PATTERNS="mcar,seq,scm"
 
 # 3. 缺失率 (用逗号分隔，不要有空格，结尾不要留逗号)
 # 例如 0.1,0.2 代表 10% 和 20%
-PIS="0.1,0.2"
+PIS="0.1,0.3,0.5"
 
 # 4. 数据切分时间范围 (数据量越小跑的越快，但容易让模型欠拟合)
 # Train 范围
 TRAIN_START="2023-01-01"
-TRAIN_END="2023-01-10"
+TRAIN_END="2023-01-31"
 # Val 范围
-VAL_START="2023-01-11"
-VAL_END="2023-01-20"
+VAL_START="2023-02-01"
+VAL_END="2023-02-28"
 # Test 范围
-TEST_START="2023-01-21"
-TEST_END="2023-01-31"
+TEST_START="2023-03-01"
+TEST_END="2023-03-31"
 
 # 5. 深度学习相关的训练大周期数 (Epochs)
 # 快速测试写 1，要出成果写 10~30
@@ -68,6 +68,7 @@ uv run python main.py \
   --test-end "${TEST_END}" \
   --epochs "${EPOCHS}" \
   --hpo-trials "${HPO_TRIALS}" \
+  --quiet-train \
   --run-name "${RUN_NAME}"
 
 echo "=========================================================="

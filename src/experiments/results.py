@@ -87,10 +87,4 @@ def save_experiment_results(
             indent=2,
         )
 
-    # Output brief log lines
-    print("\nResults (pivot):")
-    print(pivot.to_string(index=False))
-    print(f"\nSaved long results: {result_csv}")
-    print(f"Saved pivot results: {pivot_csv}")
-    print(f"Saved timing summary: {timing_csv}")
-    print(f"Saved metrics: {metrics_json}")
+    # Removed verbose log lines for incremental saves to keep console clean

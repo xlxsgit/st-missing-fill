@@ -16,6 +16,10 @@ from src.models.dispatcher import SUPPORTED_MODELS, run_baseline_on_splits
 from src.experiments.results import save_experiment_results
 from src.models.search_space import get_search_space_for_model
 import optuna
+import logging
+from rich.console import Console
+from rich.table import Table
+from rich.live import Live
 
 class Tee:
     def __init__(self, *streams):
@@ -145,7 +149,8 @@ def run_experiments(args, project_root: Path) -> None:
         tee = Tee(sys.stdout, log_f)
         with contextlib.redirect_stdout(tee), contextlib.redirect_stderr(tee):
             print(f"Run dir: {run_dir}")
-            print(f"Args: {vars(args)}")
+            print("Args:")
+            print(json.dumps(vars(args), indent=2))
 
             device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
             print(f"Using device: {device}")
@@ -176,25 +181,62 @@ def run_experiments(args, project_root: Path) -> None:
             }
             scm_params = {"pi_hat": args.scm_pi_hat}
 
+            # Setup rich console
+            # Force rich to use sys.__stdout__ or sys.__stderr__ to bypass the `Tee` redirection 
+            # so that ANSI cursor movement and live animation escape codes are actually printed to the terminal.
+            import sys as _sys
+            console = Console(file=_sys.__stdout__)
+            
+            # Suppress pypots warnings
+            import warnings
+            warnings.filterwarnings("ignore", category=UserWarning, module="pypots")
+            import logging
+            logging.getLogger("pypots").setLevel(logging.ERROR)
+            
+            try:
+                from pypots.utils.logging import logger_creator as pypots_logger_creator
+                pypots_logger_creator.set_level("error")
+                pypots_logger_creator.set_level = lambda *args, **kwargs: None
+                from tsdb.utils.logging import logger_creator as tsdb_logger_creator
+                tsdb_logger_creator.set_level("error")
+                tsdb_logger_creator.set_level = lambda *args, **kwargs: None
+            except Exception:
+                pass
+            
+            # Initialize rich table
+            result_table = Table(title="Experiment Progress", show_header=True, header_style="bold magenta")
+            result_table.add_column("Model", style="cyan", justify="left")
+            result_table.add_column("Pattern", justify="center")
+            result_table.add_column("PI", justify="right")
+            result_table.add_column("Val RMSE", justify="right", style="green")
+            result_table.add_column("Test RMSE", justify="right", style="yellow")
+            result_table.add_column("Time (s)", justify="right")
+
             rows = []
             combo_idx = 0
-            for model_name in models:
-                for pattern in patterns:
-                    for pi in pis:
-                        combo_seed = None if args.seed is None else args.seed + combo_idx * 1009
-                        combo_idx += 1
-                        print(
-                            f"\n[RUN] model={model_name}, pattern={pattern}, pi={pi}, combo_seed={combo_seed}"
-                        )
-                        masked, masks, split_seed = build_missing_inputs(
-                            split_y,
-                            pattern,
-                            pi,
-                            all_stations_cluster,
-                            combo_seed,
-                            seq_params,
-                            scm_params,
-                        )
+            
+            from rich.console import Group
+            from rich.text import Text
+
+            with Live(result_table, console=console, refresh_per_second=4) as live:
+                for model_name in models:
+                    for pattern in patterns:
+                        for pi in pis:
+                            current_status = Text(f"⏳ Currently running: Model={model_name} | Pattern={pattern} | PI={pi:.2f}", style="bold yellow")
+                            live.update(Group(current_status, result_table))
+
+                            combo_seed = None if args.seed is None else args.seed + combo_idx * 1009
+                            combo_idx += 1
+                            
+                            masked, masks, split_seed = build_missing_inputs(
+                                split_y,
+                                pattern,
+                                pi,
+                                all_stations_cluster,
+                                combo_seed,
+                                seq_params,
+                                scm_params,
+                            )
                         # ========= HPO Objective ==========
                         best_hparams = None
                         if args.hpo_trials > 0:
@@ -238,7 +280,6 @@ def run_experiments(args, project_root: Path) -> None:
                                 print(f"*** Skipped HPO for {model_name} (no search space defined) ***")
 
                         # ========= 最终模型运行与测试 ==========
-                        print(f"[{'HPO BEST' if best_hparams else 'RUN'}] Executing final pass for {model_name}")
                         rmse_by_split, timing = run_baseline_on_splits(
                             model_name=model_name,
                             split_y=split_y,
@@ -275,14 +316,16 @@ def run_experiments(args, project_root: Path) -> None:
                                     "total_seconds": float(timing["total_seconds"]),
                                 }
                             )
-                        print(
-                            f"RMSE train/val/test: "
-                            f"{rmse_by_split['train']:.4f}/{rmse_by_split['val']:.4f}/{rmse_by_split['test']:.4f}"
+
+                        result_table.add_row(
+                            model_name,
+                            pattern,
+                            f"{pi:.2f}",
+                            f"{rmse_by_split['val']:.4f}",
+                            f"{rmse_by_split['test']:.4f}",
+                            f"{timing['total_seconds']:.2f}"
                         )
-                        print(
-                            "Timing (s) train/infer/total: "
-                            f"{timing['train_seconds']:.3f}/{timing['infer_seconds']:.3f}/{timing['total_seconds']:.3f}"
-                        )
+                        live.update(Group(current_status, result_table))
                         
                         # [INCREMENTAL SAVE] 递增存档以防止中断
                         df = pd.DataFrame(rows)
@@ -317,5 +360,8 @@ def run_experiments(args, project_root: Path) -> None:
                         df_combo = pd.DataFrame([combo_summary])
                         file_exists = global_summary_path.exists()
                         df_combo.to_csv(global_summary_path, mode="a", index=False, header=not file_exists)
+
+                # Clear the status indicator at the end and only show the final table
+                live.update(result_table)
 
             print(f"\nSaved log: {log_path}")
