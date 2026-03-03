@@ -14,6 +14,7 @@ SUPPORTED_MODELS = {
     "knn",
     "mice",
     "vcaan",
+    "mymodel",
 }
 
 
@@ -71,4 +72,18 @@ def run_baseline_on_splits(
         )
     if model_name == "vcaan":
         return run_vcaan_on_splits(fast_y, fast_masked, fast_masks)
+    if model_name == "mymodel":
+        from src.models.mymodel.runner import run_mymodel_on_splits
+        return run_mymodel_on_splits(
+            split_y=fast_y,
+            split_masked=fast_masked,
+            split_masks=fast_masks,
+            device=device,
+            window_size=window_size,
+            epochs=hparams_override.get("epochs", epochs) if hparams_override else epochs,
+            batch_size=hparams_override.get("batch_size", batch_size) if hparams_override else batch_size,
+            max_windows=max_windows,
+            verbose=verbose,
+            hparams_override=hparams_override
+        )
     raise ValueError(f"Unknown model: {model_name}")

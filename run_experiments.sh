@@ -8,27 +8,26 @@
 # ==========================================
 
 # 1. 想要运行的模型 (用逗号分隔，不要有空格)
-# 可选项: locf,saits,grud,usgan,itransformer,knn,mice,vcaan
-MODELS="locf,saits,grud,itransformer,knn,mice,vcaan"
+# 可选项: locf,saits,grud,usgan,itransformer,knn,mice,vcaan,mymodel
+MODELS="locf,saits,itransformer,knn,mice,mymodel"
 
 # 2. 缺失模式 (用逗号分隔，不要有空格)
 # 可选项: mcar(完全随机), seq(连续块缺失), scm(空间相关缺失)
 PATTERNS="mcar,seq,scm"
 
 # 3. 缺失率 (用逗号分隔，不要有空格，结尾不要留逗号)
-# 例如 0.1,0.2 代表 10% 和 20%
-PIS="0.1,0.3,0.5"
+PIS="0.1"
 
 # 4. 数据切分时间范围 (数据量越小跑的越快，但容易让模型欠拟合)
 # Train 范围
 TRAIN_START="2023-01-01"
-TRAIN_END="2023-01-31"
+TRAIN_END="2023-01-15"
 # Val 范围
-VAL_START="2023-02-01"
-VAL_END="2023-02-28"
+VAL_START="2023-01-16"
+VAL_END="2023-01-31"
 # Test 范围
-TEST_START="2023-03-01"
-TEST_END="2023-03-31"
+TEST_START="2023-02-01"
+TEST_END="2023-02-15"
 
 # 5. 深度学习相关的训练大周期数 (Epochs)
 # 快速测试写 1，要出成果写 10~30

@@ -1,0 +1,327 @@
+import time
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+import pandas as pd
+
+from src.evaluate import rmse_on_missing_2d, rmse_on_missing_3d
+from src.models.mymodel.model import STAT_Model
+from src.data.load import load_data
+
+
+def build_topo_features(all_stations: list) -> torch.Tensor:
+    """
+    Extracts topographic features for each station in `all_stations` from the dataframe.
+    Returns tensor of shape [num_stations, topo_dim] (X, Y, Z, ASPECT).
+    """
+    # Assuming we can read the already processed CSV directly
+    df_stations = pd.read_csv('data/processed/all_stations.csv')
+    topo_dict = {}
+    for _, row in df_stations.iterrows():
+        topo_dict[row["Station"]] = [row["X"], row["Y"], row["Height"], row["ASPECT"]]
+        
+    topo_list = [topo_dict[s] for s in all_stations]
+    return torch.tensor(np.array(topo_list), dtype=torch.float32)
+
+
+class STAT_Loss(nn.Module):
+    def __init__(self, lambda_clean=0.5):
+        super().__init__()
+        self.lambda_clean = lambda_clean
+        self.mse = nn.MSELoss()
+        
+    def forward(self, Y_hat, Y_clean, Y_true, mask):
+        observed_idx = mask == 1.0
+        if observed_idx.sum() == 0:
+            return torch.tensor(0.0, device=Y_hat.device, requires_grad=True)
+            
+        loss_final = self.mse(Y_hat[observed_idx], Y_true[observed_idx])
+        loss_clean = self.mse(Y_clean[observed_idx], Y_true[observed_idx])
+        
+        rmse_final = torch.sqrt(loss_final + 1e-8)
+        rmse_clean = torch.sqrt(loss_clean + 1e-8)
+        
+        return rmse_final + self.lambda_clean * rmse_clean
+
+
+def prepare_spatial_windows(y_2d: np.ndarray, window_size: int, max_windows: int = None) -> np.ndarray:
+    """
+    Reshapes [Stations, Timesteps] -> [NumWindows, Stations, WindowSize]
+    Preserves the spatial dimension!
+    """
+    stations, timesteps = y_2d.shape
+    usable_steps = (timesteps // window_size) * window_size
+    if usable_steps == 0:
+        raise ValueError(f"window_size={window_size} is larger than timesteps={timesteps}")
+        
+    y_trim = y_2d[:, :usable_steps] # [S, Usable_T]
+    
+    # [S, Num_Windows, WindowSize]
+    y_reshape = y_trim.reshape(stations, -1, window_size)
+    
+    # Transpose to: [Num_Windows, S, WindowSize]
+    y_win = y_reshape.transpose(1, 0, 2)
+    
+    if max_windows is not None:
+        y_win = y_win[:max(1, max_windows)]
+        
+    return y_win.astype(np.float32)
+
+
+def build_spatial_dataloader(split_y: np.ndarray, split_masked: np.ndarray, split_masks: np.ndarray, 
+                             ground_X_split: np.ndarray, topo_features: torch.Tensor, wind_dir_idx: int, 
+                             window_size: int, batch_size: int, shuffle: bool, max_windows: int = None):
+    """
+    ground_X_split: [Stations, Timesteps, Covariates]
+    """
+    # 1. Target and Masks
+    Y_true_win = prepare_spatial_windows(split_y, window_size, max_windows)               # [B, S, W]
+    
+    # split_masked usually has 3rd dim as 1 (from simulate_missingness). Squeeze it if needed.
+    if split_masked.ndim == 3 and split_masked.shape[-1] == 1:
+        split_masked = split_masked.squeeze(-1)
+    Y_raw_win = prepare_spatial_windows(split_masked, window_size, max_windows)           # [B, S, W]
+    mask_win = prepare_spatial_windows(split_masks, window_size, max_windows)             # [B, S, W]
+    
+    # 2. Covariates processing (ground_X -> [S, T, Covariates])
+    # Need to reshape `ground_X_split` -> [B, S, W, Covariates]
+    S, T, C = ground_X_split.shape
+    usable_steps = (T // window_size) * window_size
+    X_trim = ground_X_split[:, :usable_steps, :]
+    
+    # reshape to [S, Num_Windows, W, C]
+    X_reshape = X_trim.reshape(S, -1, window_size, C)
+    
+    # transpose to [Num_Windows, S, W, C]
+    X_win = X_reshape.transpose(1, 0, 2, 3) 
+    
+    if max_windows is not None:
+        X_win = X_win[:max(1, max_windows)]
+    X_win = X_win.astype(np.float32)
+    
+    # 3. Separate Wind Direction (assuming wind_dir_idx is known)
+    wind_dir_win = X_win[..., wind_dir_idx] # [B, S, W]
+    
+    # Retain all covariates (we can let the model use wind_dir again as covariate or pop it)
+    covariates_win = X_win # [B, S, W, C]
+    
+    # Convert all to Tensors
+    t_Y_raw = torch.tensor(Y_raw_win)
+    t_mask = torch.tensor(mask_win)
+    t_cov = torch.tensor(covariates_win)
+    t_wdir = torch.tensor(wind_dir_win)
+    t_Y_true = torch.tensor(Y_true_win)
+    
+    # print size for debugging
+    print(f"Shapes -> Y_raw: {t_Y_raw.shape}, mask: {t_mask.shape}, cov: {t_cov.shape}, wdir: {t_wdir.shape}, Y_true: {t_Y_true.shape}")
+    
+    dataset = TensorDataset(t_Y_raw, t_mask, t_cov, t_wdir, t_Y_true)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+
+
+def evaluate_mymodel(model, data_loader, device):
+    model.eval()
+    mse_sum = 0.0
+    count = 0
+    with torch.no_grad():
+        for batch in data_loader:
+            Y_raw, mask, cov, wdir, Y_true = [b.to(device) for b in batch]
+            
+            # The station IDs and Topo are handled as static attributes or passed in
+            # topo_batch: [B, S, W, 4]
+            topo_batch = model.static_topo_features.unsqueeze(0).unsqueeze(2).expand(Y_raw.size(0), -1, Y_raw.size(2), -1)
+            station_ids = torch.arange(Y_raw.size(1), device=device)
+            
+            Y_hat, _ = model(Y_raw, mask, cov, topo_batch, wdir, station_ids)
+            
+            observed_idx = mask == 1.0 # Evaluate only on observed
+            if observed_idx.sum() > 0:
+                mse = nn.functional.mse_loss(Y_hat[observed_idx], Y_true[observed_idx], reduction='sum')
+                mse_sum += mse.item()
+                count += observed_idx.sum().item()
+                
+    if count == 0:
+        return float('inf')
+    return np.sqrt(mse_sum / count)
+
+
+def run_mymodel_on_splits(
+    split_y: dict,
+    split_masked: dict,
+    split_masks: dict,
+    device,
+    window_size: int,
+    epochs: int,
+    batch_size: int,
+    max_windows: int | None,
+    verbose: bool,
+    hparams_override: dict | None = None,
+) -> tuple[dict[str, float], dict[str, float]]:
+    
+    # 1. Load static topography and covariates
+    ground_X, _, all_stations, _, vars_info = load_data()
+    # Find wind direction index in X covariates
+    wind_dir_idx = vars_info['x'].index('wind_direction') if 'wind_direction' in vars_info['x'] else 0
+    num_covariates = len(vars_info['x'])
+    
+    # Extract LV95 Topo Features: [S, 4]
+    topo_features = build_topo_features(all_stations).to(device)
+    num_stations = len(all_stations)
+    
+    # Determine the time splits for ground_X to match split_y lengths
+    # (Since split_y is already sliced by time)
+    # We will slice ground_X based on the shape of split_y
+    lengths = {
+        'train': split_y['train'].shape[1],
+        'val': split_y['val'].shape[1],
+        'test': split_y['test'].shape[1],
+    }
+    
+    X_splits = {}
+    current_idx = 0
+    # ground_X is [S, C, Time]. We transpose to [S, Time, C]
+    X_transposed = ground_X.transpose(0, 2, 1)
+    
+    for split_name in ['train', 'val', 'test']:
+        L = lengths[split_name]
+        X_splits[split_name] = X_transposed[:, current_idx : current_idx + L, :]
+        current_idx += L
+
+    # 2. Build DataLoaders
+    # Enforce a maximum batch size for mymodel to prevent MPS OOM during Transformer autograd
+    effective_batch_size = min(batch_size, 8)
+    
+    loaders = {}
+    for split_name in ['train', 'val', 'test']:
+        loaders[split_name] = build_spatial_dataloader(
+            split_y=split_y[split_name],
+            split_masked=split_masked[split_name],
+            split_masks=split_masks[split_name],
+            ground_X_split=X_splits[split_name],
+            topo_features=topo_features,
+            wind_dir_idx=wind_dir_idx,
+            window_size=window_size,
+            batch_size=effective_batch_size,
+            shuffle=(split_name == 'train'),
+            max_windows=max_windows
+        )
+
+    # 3. Model Initialization
+    d_model = hparams_override.get('d_model', 128) if hparams_override else 128
+    l_lags = hparams_override.get('l_lags', 3) if hparams_override else 3
+    num_layers = hparams_override.get('num_layers', 2) if hparams_override else 2
+    nhead = hparams_override.get('nhead', 4) if hparams_override else 4
+    
+    model = STAT_Model(
+        num_stations=num_stations,
+        num_covariates=num_covariates,
+        seq_len=window_size,
+        d_model=d_model,
+        nhead=nhead,
+        num_layers=num_layers,
+        l_lags=l_lags,
+        topo_dim=4, # X, Y, Z, ASPECT
+        device=device
+    ).to(device)
+    
+    # Attach static topo for convenience in eval
+    model.static_topo_features = topo_features 
+    
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    criterion = STAT_Loss(lambda_clean=0.5)
+    
+    # 4. Training Loop
+    t0 = time.perf_counter()
+    best_val_rmse = float('inf')
+    
+    for epoch in range(epochs):
+        model.train()
+        train_loss = 0.0
+        for batch in loaders['train']:
+            if hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
+                torch.mps.empty_cache()
+                
+            Y_raw, mask, cov, wdir, Y_true = [b.to(device) for b in batch]
+            
+            # Prepare static inputs
+            # topo_batch: [B, S, W, 4]
+            # station_ids: [S]
+            B, S, W = Y_raw.shape
+            topo_batch = topo_features.unsqueeze(0).unsqueeze(2).expand(B, -1, W, -1)
+            station_ids = torch.arange(S, device=device)
+            
+            optimizer.zero_grad()
+            Y_hat, Y_clean = model(Y_raw, mask, cov, topo_batch, wdir, station_ids)
+            
+            loss = criterion(Y_hat, Y_clean, Y_true, mask)
+            loss.backward()
+            optimizer.step()
+            train_loss += loss.item()
+            
+        # Validation
+        val_rmse = evaluate_mymodel(model, loaders['val'], device)
+        if verbose:
+            print(f"Epoch [{epoch+1}/{epochs}] Train Loss: {train_loss:.4f} | Val RMSE: {val_rmse:.4f}")
+            
+        if val_rmse < best_val_rmse:
+            best_val_rmse = val_rmse
+            # Ideally save model state here
+            
+    train_seconds = time.perf_counter() - t0
+    
+    # 5. Full Evaluation (Inference)
+    t1 = time.perf_counter()
+    
+    def predict_split(loader):
+        model.eval()
+        all_preds = []
+        with torch.no_grad():
+            for batch in loader:
+                Y_raw, mask, cov, wdir, _ = [b.to(device) for b in batch]
+                B, S, W = Y_raw.shape
+                topo_batch = topo_features.unsqueeze(0).unsqueeze(2).expand(B, -1, W, -1)
+                station_ids = torch.arange(S, device=device)
+                
+                Y_hat, _ = model(Y_raw, mask, cov, topo_batch, wdir, station_ids)
+                all_preds.append(Y_hat.cpu().numpy())
+                
+        preds_concat = np.concatenate(all_preds, axis=0) # [B, S, W]
+        # Reshape to [S, B*W] to match original flattened shape and mask format
+        S_dim = preds_concat.shape[1]
+        preds_2d = preds_concat.transpose(1, 0, 2).reshape(S_dim, -1)
+        return preds_2d
+        
+    train_pred_2d = predict_split(loaders['train'])
+    val_pred_2d = predict_split(loaders['val'])
+    test_pred_2d = predict_split(loaders['test'])
+    
+    infer_seconds = time.perf_counter() - t1
+    
+    # 6. Calculate True RMSE
+    # Need to match the exact truncated length that predict_split returned
+    # because the DataLoader drops the last partial window
+    def truncate_to_match(original_arr, pred_arr):
+        pred_len = pred_arr.shape[1]
+        return original_arr[:, :pred_len]
+        
+    rmses = {
+        "train": rmse_on_missing_2d(train_pred_2d, 
+                                    truncate_to_match(split_y['train'], train_pred_2d), 
+                                    truncate_to_match(split_masks['train'], train_pred_2d)),
+        "val": rmse_on_missing_2d(val_pred_2d, 
+                                  truncate_to_match(split_y['val'], val_pred_2d), 
+                                  truncate_to_match(split_masks['val'], val_pred_2d)),
+        "test": rmse_on_missing_2d(test_pred_2d, 
+                                   truncate_to_match(split_y['test'], test_pred_2d), 
+                                   truncate_to_match(split_masks['test'], test_pred_2d)),
+    }
+    
+    timing = {
+        "train_seconds": float(train_seconds),
+        "infer_seconds": float(infer_seconds),
+        "total_seconds": float(train_seconds + infer_seconds),
+    }
+    
+    return rmses, timing
+
