@@ -18,8 +18,10 @@ def save_experiment_results(
 ) -> None:
     """Save all artifacts for a run: CSVs, pivot tables, logs, configs, metrics."""
     # 1. Long results
+    if "combo_seed" in df_long.columns:
+        df_long = df_long.drop(columns=["combo_seed"])
     result_csv = run_dir / "results_long.csv"
-    df_long.to_csv(result_csv, index=False)
+    df_long.to_csv(result_csv, index=False, float_format="%.4f")
 
     # 2. Pivot results
     pivot = (
@@ -33,12 +35,12 @@ def save_experiment_results(
         .sort_values(["model", "pattern", "pi"])
     )
     pivot_csv = run_dir / "results_pivot.csv"
-    pivot.to_csv(pivot_csv, index=False)
+    pivot.to_csv(pivot_csv, index=False, float_format="%.4f")
 
     # 3. Timing summary
     timing_pivot = (
         df_long.groupby(["model", "pattern", "pi"], as_index=False)[
-            ["train_seconds", "infer_seconds", "total_seconds"]
+            ["total_seconds"]
         ]
         .first()
         .sort_values(["model", "pattern", "pi"])

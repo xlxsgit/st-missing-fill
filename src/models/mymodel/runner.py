@@ -113,9 +113,6 @@ def build_spatial_dataloader(split_y: np.ndarray, split_masked: np.ndarray, spli
     t_wdir = torch.tensor(wind_dir_win)
     t_Y_true = torch.tensor(Y_true_win)
     
-    # print size for debugging
-    print(f"Shapes -> Y_raw: {t_Y_raw.shape}, mask: {t_mask.shape}, cov: {t_cov.shape}, wdir: {t_wdir.shape}, Y_true: {t_Y_true.shape}")
-    
     dataset = TensorDataset(t_Y_raw, t_mask, t_cov, t_wdir, t_Y_true)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
@@ -154,9 +151,15 @@ def run_mymodel_on_splits(
     window_size: int,
     epochs: int,
     batch_size: int,
+    patience: int,
     max_windows: int | None,
     verbose: bool,
     hparams_override: dict | None = None,
+    mode: str = "all",
+    project_root: str | None = None,
+    run_dir: str | None = None,
+    pattern: str = "mcar",
+    pi: float = 0.1,
 ) -> tuple[dict[str, float], dict[str, float]]:
     
     # 1. Load static topography and covariates
@@ -207,10 +210,27 @@ def run_mymodel_on_splits(
             max_windows=max_windows
         )
 
+    import json
+    from pathlib import Path
+    
+    # Assumes run_dir is passed correctly when mode separates train and test
+    _run_dir = Path(run_dir) if run_dir else (Path(project_root) if project_root else Path.cwd())
+    model_save_dir = _run_dir / "saved_models" / "mymodel"
+    model_save_dir.mkdir(parents=True, exist_ok=True)
+    model_path = model_save_dir / f"mymodel_{pattern}_{pi}.pt"
+    hparams_path = model_save_dir / f"mymodel_{pattern}_{pi}_hparams.json"
+
     # 3. Model Initialization
+    if mode == "test" and hparams_override is None:
+        if hparams_path.exists():
+            with open(hparams_path, "r") as f:
+                saved_config = json.load(f)
+                hparams_override = saved_config.get("best_hparams", None)
+
+    # Applied optimized default parameters from Optuna run
     d_model = hparams_override.get('d_model', 128) if hparams_override else 128
-    l_lags = hparams_override.get('l_lags', 3) if hparams_override else 3
-    num_layers = hparams_override.get('num_layers', 2) if hparams_override else 2
+    l_lags = hparams_override.get('l_lags', 2) if hparams_override else 2
+    num_layers = hparams_override.get('num_layers', 1) if hparams_override else 1
     nhead = hparams_override.get('nhead', 4) if hparams_override else 4
     
     model = STAT_Model(
@@ -231,44 +251,79 @@ def run_mymodel_on_splits(
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     criterion = STAT_Loss(lambda_clean=0.5)
     
-    # 4. Training Loop
+    # Train or Load logic
     t0 = time.perf_counter()
     best_val_rmse = float('inf')
+    early_stop_counter = 0
     
-    for epoch in range(epochs):
-        model.train()
-        train_loss = 0.0
-        for batch in loaders['train']:
-            if hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
-                torch.mps.empty_cache()
+    if mode in ("train", "all"):
+        for epoch in range(epochs):
+            model.train()
+            train_loss = 0.0
+            for batch in loaders['train']:
+                Y_raw, mask, cov, wdir, Y_true = [b.to(device) for b in batch]
                 
-            Y_raw, mask, cov, wdir, Y_true = [b.to(device) for b in batch]
+                # Prepare static inputs
+                B, S, W = Y_raw.shape
+                topo_batch = topo_features.unsqueeze(0).unsqueeze(2).expand(B, -1, W, -1)
+                station_ids = torch.arange(S, device=device)
+                
+                optimizer.zero_grad()
+                Y_hat, Y_clean = model(Y_raw, mask, cov, topo_batch, wdir, station_ids)
+                
+                loss = criterion(Y_hat, Y_clean, Y_true, mask)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
+                
+            # Validation
+            val_rmse = evaluate_mymodel(model, loaders['val'], device)
+            if verbose:
+                print(f"Epoch [{epoch+1}/{epochs}] Train Loss: {train_loss:.4f} | Val RMSE: {val_rmse:.4f}")
+                
+            if val_rmse < best_val_rmse:
+                best_val_rmse = val_rmse
+                early_stop_counter = 0
+                # Save best state dict
+                torch.save(model.state_dict(), str(model_path))
+            else:
+                early_stop_counter += 1
+                if early_stop_counter >= patience:
+                    if verbose:
+                        print(f"Early stopping triggered at epoch {epoch+1}")
+                    break
+        
+        # Finally, save hparams config
+        num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        hparams_to_save = {
+            "model_name": "mymodel",
+            "pattern": pattern,
+            "pi": pi,
+            "best_hparams": hparams_override or {"d_model": d_model, "l_lags": l_lags, "num_layers": num_layers, "nhead": nhead},
+            "num_params": num_params,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "window_size": window_size,
+        }
+        with open(str(hparams_path), "w") as f:
+            json.dump(hparams_to_save, f, indent=4)
             
-            # Prepare static inputs
-            # topo_batch: [B, S, W, 4]
-            # station_ids: [S]
-            B, S, W = Y_raw.shape
-            topo_batch = topo_features.unsqueeze(0).unsqueeze(2).expand(B, -1, W, -1)
-            station_ids = torch.arange(S, device=device)
-            
-            optimizer.zero_grad()
-            Y_hat, Y_clean = model(Y_raw, mask, cov, topo_batch, wdir, station_ids)
-            
-            loss = criterion(Y_hat, Y_clean, Y_true, mask)
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-            
-        # Validation
-        val_rmse = evaluate_mymodel(model, loaders['val'], device)
-        if verbose:
-            print(f"Epoch [{epoch+1}/{epochs}] Train Loss: {train_loss:.4f} | Val RMSE: {val_rmse:.4f}")
-            
-        if val_rmse < best_val_rmse:
-            best_val_rmse = val_rmse
-            # Ideally save model state here
-            
+        # Ensure we evaluate the best model state instead of the last epoch
+        if model_path.exists():
+            model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True))
+
+    else: # mode == "test"
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model file not found for inference: {model_path}. Run with '--mode train' first.")
+        model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True))
+        
     train_seconds = time.perf_counter() - t0
+    
+    # Optional: Clear cache and collect garbage after training to free up MPS memory before inference
+    import gc
+    gc.collect()
+    if hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
+        torch.mps.empty_cache()
     
     # 5. Full Evaluation (Inference)
     t1 = time.perf_counter()
@@ -292,9 +347,9 @@ def run_mymodel_on_splits(
         preds_2d = preds_concat.transpose(1, 0, 2).reshape(S_dim, -1)
         return preds_2d
         
-    train_pred_2d = predict_split(loaders['train'])
-    val_pred_2d = predict_split(loaders['val'])
-    test_pred_2d = predict_split(loaders['test'])
+    train_pred_2d = predict_split(loaders['train']) if mode in ("train", "all") else np.empty((split_y['train'].shape[0], 0))
+    val_pred_2d = predict_split(loaders['val']) if mode in ("train", "all") else np.empty((split_y['val'].shape[0], 0))
+    test_pred_2d = predict_split(loaders['test']) if mode in ("test", "all") else np.empty((split_y['test'].shape[0], 0))
     
     infer_seconds = time.perf_counter() - t1
     
@@ -308,13 +363,13 @@ def run_mymodel_on_splits(
     rmses = {
         "train": rmse_on_missing_2d(train_pred_2d, 
                                     truncate_to_match(split_y['train'], train_pred_2d), 
-                                    truncate_to_match(split_masks['train'], train_pred_2d)),
+                                    truncate_to_match(split_masks['train'], train_pred_2d)) if mode in ("train", "all") else np.nan,
         "val": rmse_on_missing_2d(val_pred_2d, 
                                   truncate_to_match(split_y['val'], val_pred_2d), 
-                                  truncate_to_match(split_masks['val'], val_pred_2d)),
+                                  truncate_to_match(split_masks['val'], val_pred_2d)) if mode in ("train", "all") else np.nan,
         "test": rmse_on_missing_2d(test_pred_2d, 
                                    truncate_to_match(split_y['test'], test_pred_2d), 
-                                   truncate_to_match(split_masks['test'], test_pred_2d)),
+                                   truncate_to_match(split_masks['test'], test_pred_2d)) if mode in ("test", "all") else np.nan,
     }
     
     timing = {

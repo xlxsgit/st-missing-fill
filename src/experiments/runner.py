@@ -14,12 +14,9 @@ from src.data.misser import simulate_missingness
 from src.data.splitter import load_time_index, split_by_datetime
 from src.models.dispatcher import SUPPORTED_MODELS, run_baseline_on_splits
 from src.experiments.results import save_experiment_results
-from src.models.search_space import get_search_space_for_model
 import optuna
 import logging
-from rich.console import Console
-from rich.table import Table
-from rich.live import Live
+from src.models.search_space import get_search_space_for_model
 
 class Tee:
     def __init__(self, *streams):
@@ -49,7 +46,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--max-windows", type=int, default=None)
+    parser.add_argument("--patience", type=int, default=10, help="Number of epochs to wait before early stopping")
     parser.add_argument("--run-name", type=str, default=None)
+    parser.add_argument("--mode", type=str, choices=["train", "test", "all"], default="all", help="Whether to train models, test pre-trained models, or do all.")
     parser.add_argument("--quiet-train", action="store_true")
     parser.add_argument("--knn-chunk-steps", type=int, default=1008)
     parser.add_argument("--mice-chunk-steps", type=int, default=720)
@@ -127,21 +126,12 @@ def run_experiments(args, project_root: Path) -> None:
         if m.lower() not in SUPPORTED_MODELS:
             raise ValueError(f"Unknown model: {m}")
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     if args.run_name:
-        run_id = f"{run_id}_{args.run_name}"
+        run_id = args.run_name
+    else:
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir = project_root / "logs" / run_id
-    run_dir.mkdir(parents=True, exist_ok=False)
-
-    # 创建 latest 软链
-    latest_dir = project_root / "logs" / "latest"
-    if latest_dir.is_symlink() or latest_dir.exists():
-        if hasattr(latest_dir, "unlink"):
-            latest_dir.unlink(missing_ok=True)
-    try:
-        latest_dir.symlink_to(run_dir.name, target_is_directory=True)
-    except Exception:
-        pass
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     log_path = run_dir / "train.log"
 
@@ -181,12 +171,6 @@ def run_experiments(args, project_root: Path) -> None:
             }
             scm_params = {"pi_hat": args.scm_pi_hat}
 
-            # Setup rich console
-            # Force rich to use sys.__stdout__ or sys.__stderr__ to bypass the `Tee` redirection 
-            # so that ANSI cursor movement and live animation escape codes are actually printed to the terminal.
-            import sys as _sys
-            console = Console(file=_sys.__stdout__)
-            
             # Suppress pypots warnings
             import warnings
             warnings.filterwarnings("ignore", category=UserWarning, module="pypots")
@@ -202,28 +186,18 @@ def run_experiments(args, project_root: Path) -> None:
                 tsdb_logger_creator.set_level = lambda *args, **kwargs: None
             except Exception:
                 pass
-            
-            # Initialize rich table
-            result_table = Table(title="Experiment Progress", show_header=True, header_style="bold magenta")
-            result_table.add_column("Model", style="cyan", justify="left")
-            result_table.add_column("Pattern", justify="center")
-            result_table.add_column("PI", justify="right")
-            result_table.add_column("Val RMSE", justify="right", style="green")
-            result_table.add_column("Test RMSE", justify="right", style="yellow")
-            result_table.add_column("Time (s)", justify="right")
 
             rows = []
             combo_idx = 0
             
-            from rich.console import Group
-            from rich.text import Text
-
-            with Live(result_table, console=console, refresh_per_second=4) as live:
+            with contextlib.nullcontext():
+                print(f"{'Model':<14} | {'Pattern':<9} | {'PI':<5} | {'Test RMSE':<10} | {'Time(s)':<8} | Status")
+                print("-" * 65)
                 for model_name in models:
                     for pattern in patterns:
                         for pi in pis:
-                            current_status = Text(f"⏳ Currently running: Model={model_name} | Pattern={pattern} | PI={pi:.2f}", style="bold yellow")
-                            live.update(Group(current_status, result_table))
+                            msg_start = f"{model_name:<14} | {pattern:<9} | {pi:<5.2f} | {'-':<10} | {'-':<8} | ⏳"
+                            print(msg_start, end="\r", flush=True)
 
                             combo_seed = None if args.seed is None else args.seed + combo_idx * 1009
                             combo_idx += 1
@@ -237,131 +211,192 @@ def run_experiments(args, project_root: Path) -> None:
                                 seq_params,
                                 scm_params,
                             )
-                        # ========= HPO Objective ==========
-                        best_hparams = None
-                        if args.hpo_trials > 0:
-                            from src.models.search_space import has_search_space
-                            if has_search_space(model_name):
-                                print(f"*** Starting HPO for {model_name} with {args.hpo_trials} trials ***")
-                                
-                                def objective(trial: optuna.Trial) -> float:
-                                    # 1. 抽取超参
-                                    hparams = get_search_space_for_model(model_name, trial)
-                                    # 2. 调度执行
-                                    rmse, _ = run_baseline_on_splits(
-                                        model_name=model_name,
-                                        split_y=split_y,
-                                        split_masked=masked,
-                                        split_masks=masks,
-                                        device=device,
-                                        window_size=args.window_size,
-                                        epochs=hparams.get("epochs", args.epochs),
-                                        batch_size=hparams.get("batch_size", args.batch_size),
-                                        max_windows=args.max_windows,
-                                        verbose=False,  # HPO期间强制静默
-                                        knn_chunk_steps=args.knn_chunk_steps,
-                                        mice_chunk_steps=args.mice_chunk_steps,
-                                        knn_neighbors=hparams.get("knn_neighbors", args.knn_neighbors),
-                                        mice_max_iter=hparams.get("mice_max_iter", args.mice_max_iter),
-                                        mice_tol=hparams.get("mice_tol", args.mice_tol),
-                                        mice_quiet_warnings=True, # HPO强制静音mice
-                                        hparams_override=hparams
-                                    )
-                                    # 3. 目标为最小化在【验证集】上的 RMSE
-                                    return rmse["val"]
-                                
-                                study = optuna.create_study(direction="minimize")
-                                # 屏蔽 optuna 过多的INFO, 开启Error
-                                optuna.logging.set_verbosity(optuna.logging.WARNING)
-                                study.optimize(objective, n_trials=args.hpo_trials)
-                                best_hparams = study.best_params
-                                print(f"*** HPO Finished. Best Val RMSE: {study.best_value:.4f} with params: {best_hparams} ***")
-                            else:
-                                print(f"*** Skipped HPO for {model_name} (no search space defined) ***")
-
-                        # ========= 最终模型运行与测试 ==========
-                        rmse_by_split, timing = run_baseline_on_splits(
-                            model_name=model_name,
-                            split_y=split_y,
-                            split_masked=masked,
-                            split_masks=masks,
-                            device=device,
-                            window_size=args.window_size,
-                            epochs=args.epochs,
-                            batch_size=args.batch_size,
-                            max_windows=args.max_windows,
-                            verbose=not args.quiet_train,
-                            knn_chunk_steps=args.knn_chunk_steps,
-                            mice_chunk_steps=args.mice_chunk_steps,
-                            knn_neighbors=args.knn_neighbors,
-                            mice_max_iter=args.mice_max_iter,
-                            mice_tol=args.mice_tol,
-                            mice_quiet_warnings=not args.mice_show_warnings,
-                            hparams_override=best_hparams
-                        )
-
-                        for split_name in ["train", "val", "test"]:
-                            rows.append(
-                                {
-                                    "model": model_name,
-                                    "pattern": pattern,
-                                    "pi": pi,
-                                    "split": split_name,
-                                    "rmse": rmse_by_split[split_name],
-                                    "missing_rate": float((masks[split_name] == 0).mean()),
-                                    "combo_seed": combo_seed,
-                                    "split_seed": split_seed[split_name],
-                                    "train_seconds": float(timing["train_seconds"]),
-                                    "infer_seconds": float(timing["infer_seconds"]),
-                                    "total_seconds": float(timing["total_seconds"]),
-                                }
+                            # ========= HPO Objective ==========
+                            best_hparams = None
+                            if args.hpo_trials > 0 and args.mode in ("train", "all"):
+                                from src.models.search_space import has_search_space
+                                if has_search_space(model_name):
+                                    print(f"*** Starting HPO for {model_name} with {args.hpo_trials} trials ***")
+                                    
+                                    def objective(trial: optuna.Trial) -> float:
+                                        # 1. 抽取超参
+                                        hparams = get_search_space_for_model(model_name, trial)
+                                        # 2. 调度执行
+                                        rmse, _ = run_baseline_on_splits(
+                                            model_name=model_name,
+                                            split_y=split_y,
+                                            split_masked=masked,
+                                            split_masks=masks,
+                                            device=device,
+                                            window_size=args.window_size,
+                                            epochs=hparams.get("epochs", args.epochs),
+                                            batch_size=hparams.get("batch_size", args.batch_size),
+                                            patience=args.patience,
+                                            max_windows=args.max_windows,
+                                            verbose=False,  # HPO期间强制静默
+                                            knn_chunk_steps=args.knn_chunk_steps,
+                                            mice_chunk_steps=args.mice_chunk_steps,
+                                            knn_neighbors=hparams.get("knn_neighbors", args.knn_neighbors),
+                                            mice_max_iter=hparams.get("mice_max_iter", args.mice_max_iter),
+                                            mice_tol=hparams.get("mice_tol", args.mice_tol),
+                                            mice_quiet_warnings=True, # HPO强制静音mice
+                                            hparams_override=hparams,
+                                            mode="train",
+                                            project_root=project_root,
+                                            run_dir=run_dir,
+                                            pattern=pattern,
+                                            pi=pi
+                                        )
+                                        # 3. 目标为最小化在【验证集】上的 RMSE
+                                        return rmse["val"]
+                                    
+                                    study = optuna.create_study(direction="minimize")
+                                    # 屏蔽 optuna 过多的INFO, 开启Error
+                                    optuna.logging.set_verbosity(optuna.logging.WARNING)
+                                    study.optimize(objective, n_trials=args.hpo_trials)
+                                    best_hparams = study.best_params
+                                    print(f"*** HPO Finished. Best Val RMSE: {study.best_value:.4f} with params: {best_hparams} ***")
+                                else:
+                                    print(f"*** Skipped HPO for {model_name} (no search space defined) ***")
+    
+                            # ========= 最终模型运行与测试 ==========
+                            rmse_by_split, timing = run_baseline_on_splits(
+                                model_name=model_name,
+                                split_y=split_y,
+                                split_masked=masked,
+                                split_masks=masks,
+                                device=device,
+                                window_size=args.window_size,
+                                epochs=args.epochs,
+                                batch_size=args.batch_size,
+                                patience=args.patience,
+                                max_windows=args.max_windows,
+                                verbose=not args.quiet_train,
+                                knn_chunk_steps=args.knn_chunk_steps,
+                                mice_chunk_steps=args.mice_chunk_steps,
+                                knn_neighbors=args.knn_neighbors,
+                                mice_max_iter=args.mice_max_iter,
+                                mice_tol=args.mice_tol,
+                                mice_quiet_warnings=not args.mice_show_warnings,
+                                hparams_override=best_hparams,
+                                mode=args.mode,
+                                project_root=project_root,
+                                run_dir=run_dir,
+                                pattern=pattern,
+                                pi=pi
                             )
+    
+                            for split_name in ["train", "val", "test"]:
+                                split_rmse = rmse_by_split.get(split_name, np.nan)
+                                rows.append(
+                                    {
+                                        "model": model_name,
+                                        "pattern": pattern,
+                                        "pi": pi,
+                                        "split": split_name,
+                                        "rmse": split_rmse,
+                                        "missing_rate": float((masks[split_name] == 0).mean()),
+                                        "split_seed": split_seed[split_name],
+                                        "total_seconds": float(timing["total_seconds"]),
+                                    }
+                                )
+    
+                            test_rmse = rmse_by_split.get('test', np.nan)
+                            test_rmse_str = f"{test_rmse:<10.4f}" if not np.isnan(test_rmse) else f"{'N/A':<10}"
+                            msg_done = f"{model_name:<14} | {pattern:<9} | {pi:<5.2f} | {test_rmse_str} | {timing['total_seconds']:<8.2f} | ✅"
+                            print(msg_done, flush=True)
+                            
+                            # [INCREMENTAL SAVE] 递增存档以防止中断
+                            df = pd.DataFrame(rows)
+                            shape_info = {
+                                "ground_X": list(ground_X.shape),
+                                "ground_y": list(ground_y.shape),
+                                "train": list(split_y["train"].shape),
+                                "val": list(split_y["val"].shape),
+                                "test": list(split_y["test"].shape),
+                            }
+                            save_experiment_results(
+                                project_root, run_dir, run_id, vars(args), models, patterns, pis, shape_info, df
+                            )
+    
+                            # 全量总结大双追加
+                            global_summary_path = run_dir / "summary_all_parts.csv"
+                            
+                            hp_path = run_dir / "saved_models" / model_name / f"{model_name}_{pattern}_{pi}_hparams.json"
+                            num_params = 0
+                            hparam_str = "N/A"
+                            if hp_path.exists():
+                                with open(hp_path, "r") as f:
+                                    hp_data = json.load(f)
+                                    num_params = hp_data.get("num_params", 0)
+                                    if "best_hparams" in hp_data:
+                                        hparam_str = json.dumps(hp_data["best_hparams"])
+                            elif best_hparams:
+                                hparam_str = json.dumps(best_hparams)
+                                
+                            from src.models.search_space import get_search_bounds
+                            search_bounds_str = get_search_bounds(model_name)
 
-                        result_table.add_row(
-                            model_name,
-                            pattern,
-                            f"{pi:.2f}",
-                            f"{rmse_by_split['val']:.4f}",
-                            f"{rmse_by_split['test']:.4f}",
-                            f"{timing['total_seconds']:.2f}"
-                        )
-                        live.update(Group(current_status, result_table))
-                        
-                        # [INCREMENTAL SAVE] 递增存档以防止中断
-                        df = pd.DataFrame(rows)
-                        shape_info = {
-                            "ground_X": list(ground_X.shape),
-                            "ground_y": list(ground_y.shape),
-                            "train": list(split_y["train"].shape),
-                            "val": list(split_y["val"].shape),
-                            "test": list(split_y["test"].shape),
-                        }
-                        save_experiment_results(
-                            project_root, run_dir, run_id, vars(args), models, patterns, pis, shape_info, df
-                        )
+                            train_rmse = rmse_by_split.get("train", np.nan)
+                            val_rmse = rmse_by_split.get("val", np.nan)
+                            test_rmse = rmse_by_split.get("test", np.nan)
+                            
+                            train_time = timing["train_seconds"]
+                            test_time = timing["infer_seconds"]
+                            
+                            new_row = {
+                                "RUN_NAME": run_id,
+                                "模型": model_name,
+                                "缺失模式": pattern,
+                                "缺失率": pi,
+                                "参数量": num_params,
+                                "超参数范围": search_bounds_str,
+                                "最优超参数": hparam_str,
+                                "epochs": args.epochs,
+                                "batch size": args.batch_size,
+                                "window size": args.window_size,
+                                "train 范围": f"{args.train_start} to {args.train_end}",
+                                "train rmse": train_rmse,
+                                "val 范围": f"{args.val_start} to {args.val_end}",
+                                "val rmse": val_rmse,
+                                "test 范围": f"{args.test_start} to {args.test_end}",
+                                "test rmse": test_rmse,
+                                "训练耗时": float(train_time),
+                                "推理耗时": float(test_time)
+                            }
+                            
+                            if global_summary_path.exists():
+                                df_global = pd.read_csv(global_summary_path)
+                            else:
+                                df_global = pd.DataFrame(columns=new_row.keys())
+                                
+                            mask = (df_global.get("RUN_NAME") == run_id) & \
+                                   (df_global.get("模型") == model_name) & \
+                                   (df_global.get("缺失模式") == pattern) & \
+                                   (df_global.get("缺失率") == pi)
+                                   
+                            if not mask.any():
+                                df_global = pd.concat([df_global, pd.DataFrame([new_row])], ignore_index=True)
+                            else:
+                                idx = df_global[mask].index[0]
+                                if args.mode in ("train", "all"):
+                                    df_global.loc[idx, "参数量"] = num_params
+                                    df_global.loc[idx, "最优超参数"] = hparam_str
+                                    df_global.loc[idx, "train 范围"] = new_row["train 范围"]
+                                    if pd.notna(train_rmse):
+                                        df_global.loc[idx, "train rmse"] = train_rmse
+                                    df_global.loc[idx, "val 范围"] = new_row["val 范围"]
+                                    if pd.notna(val_rmse):
+                                        df_global.loc[idx, "val rmse"] = val_rmse
+                                    df_global.loc[idx, "训练耗时"] = float(train_time)
+                                if args.mode in ("test", "all"):
+                                    df_global.loc[idx, "test 范围"] = new_row["test 范围"]
+                                    if pd.notna(test_rmse):
+                                        df_global.loc[idx, "test rmse"] = test_rmse
+                                    df_global.loc[idx, "推理耗时"] = float(test_time)
+                                    
+                            df_global.to_csv(global_summary_path, index=False, float_format="%.4f")
 
-                        # 全量总结大双追加
-                        global_summary_path = project_root / "logs" / "summary_all_parts.csv"
-                        hparam_str = json.dumps(best_hparams) if best_hparams else "default"
-                        combo_summary = {
-                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "run_id": run_id,
-                            "model": model_name,
-                            "pattern": pattern,
-                            "pi": pi,
-                            "hparams": hparam_str,
-                            "train_rmse": rmse_by_split["train"],
-                            "val_rmse": rmse_by_split["val"],
-                            "test_rmse": rmse_by_split["test"],
-                            "train_seconds": float(timing["train_seconds"]),
-                            "infer_seconds": float(timing["infer_seconds"]),
-                            "total_seconds": float(timing["total_seconds"])
-                        }
-                        df_combo = pd.DataFrame([combo_summary])
-                        file_exists = global_summary_path.exists()
-                        df_combo.to_csv(global_summary_path, mode="a", index=False, header=not file_exists)
-
-                # Clear the status indicator at the end and only show the final table
-                live.update(result_table)
+                print("🏁 All combinations completed!")
 
             print(f"\nSaved log: {log_path}")

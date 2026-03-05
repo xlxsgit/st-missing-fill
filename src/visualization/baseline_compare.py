@@ -6,36 +6,10 @@ import pandas as pd
 import seaborn as sns
 
 
-def _load_and_prepare(df: pd.DataFrame):
-    required_cols = {"model", "pattern", "pi", "train", "val", "test"}
-    missing = required_cols - set(df.columns)
-    if missing:
-        raise ValueError(f"run dataframe missing required columns: {sorted(missing)}")
-
-    if df.empty:
-        raise ValueError(f"run dataframe is empty")
-
-    df["pattern"] = df["pattern"].str.upper()
-    df["pi"] = df["pi"].astype(float)
-    pattern_order = [p for p in ["MCAR", "SEQ", "SCM"] if p in set(df["pattern"])]
-    pi_order = sorted(df["pi"].unique().tolist())
-    combo_order = [f"{p}\npi={pi:g}" for p in pattern_order for pi in pi_order]
-    df["combo"] = [f"{p}\npi={pi:g}" for p, pi in zip(df["pattern"], df["pi"])]
-
-    # 1. Calculate the rank of each model per missingness setting
-    df["train_rank"] = df.groupby("combo")["train"].rank(method="min", ascending=True)
-    df["val_rank"] = df.groupby("combo")["val"].rank(method="min", ascending=True)
-    df["test_rank"] = df.groupby("combo")["test"].rank(method="min", ascending=True)
-
-    # 2. Sort the global model order by their Average Test Rank instead of Average RMSE
-    model_order = (
-        df.groupby("model", as_index=True)["test_rank"].mean().sort_values(ascending=True).index.tolist()
-    )
-    return df, combo_order, model_order
-
+import numpy as np
 
 def _set_plot_style():
-    sns.set_theme(style="white")
+    sns.set_theme(style="whitegrid")
     plt.rcParams.update(
         {
             "font.family": "serif",
@@ -47,7 +21,6 @@ def _set_plot_style():
         }
     )
 
-
 def plot_baseline_comparison(
     summary_df: pd.DataFrame,
     output_dir: str | Path,
@@ -55,82 +28,88 @@ def plot_baseline_comparison(
     annotate: bool = True,
     dpi: int = 350,
 ) -> dict[str, Path]:
-    """Generate concise, publication-style comparison figures directly inside a run_dir.
-
-    Output:
-    - One heatmap per split: train / val / test
-    - One test-average ranking bar chart
-    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    df, combo_order, model_order = _load_and_prepare(summary_df.copy())
     _set_plot_style()
 
-    split_cols = ["train", "val", "test"]
-    split_titles = ["Train RMSE", "Validation RMSE", "Test RMSE"]
+    df = summary_df.copy()
+    if df.empty:
+        return {}
+        
+    df["pattern"] = df["pattern"].str.upper()
+    df["pi"] = df["pi"].astype(float)
     
-    num_models = len(model_order)
-    # Use discrete ranked colors (light to dark indicates 1st to Nth)
-    cmap = mcolors.ListedColormap(sns.color_palette("YlGnBu", n_colors=num_models))
+    available_splits = [s for s in ["train", "val", "test"] if s in df.columns and not df[s].isna().all()]
+    patterns_order = ["MCAR", "SEQ", "SCM"]
+    
+    models = sorted(df["model"].unique().tolist())
+    palette = dict(zip(models, sns.color_palette("Set2", n_colors=max(len(models), 1))))
 
     out = {}
 
-    # 1) three separate heatmaps coloring by rank
-    for split, title in zip(split_cols, split_titles):
-        mat_rmse = (
-            df.pivot_table(index="model", columns="combo", values=split, aggfunc="first")
-            .reindex(index=model_order, columns=combo_order)
-        )
-        mat_rank = (
-            df.pivot_table(index="model", columns="combo", values=f"{split}_rank", aggfunc="first")
-            .reindex(index=model_order, columns=combo_order)
-        )
+    for split in available_splits:
+        fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 16), constrained_layout=True)
+        if not isinstance(axes, (list, np.ndarray)):
+            axes = [axes]
+            
+        fig.suptitle(f"{split.capitalize()} RMSE Comparison", fontsize=18, fontweight="bold")
         
-        fig, ax = plt.subplots(figsize=(10.8, 6.4), constrained_layout=True)
-        sns.heatmap(
-            mat_rank, 
-            annot=mat_rmse if annotate else False,
-            fmt=".4f",
-            ax=ax,
-            cmap=cmap,
-            vmin=1,
-            vmax=num_models,
-            linewidths=0.6,
-            linecolor="#EFEFEF",
-            cbar_kws={"shrink": 0.85, "label": "Model Rank (Darker=Worse)", "ticks": range(1, num_models + 1)},
-        )
-        ax.set_title(f"{title} (Colored by Rank)", fontweight="bold", pad=10)
-        ax.set_xlabel("")
-        ax.set_ylabel("Model")
-        ax.tick_params(axis="x", rotation=0)
-        ax.tick_params(axis="y", rotation=0)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
-        file_path = output_dir / f"baseline_heatmap_{split}_{run_id}.png"
+        for ax, pat in zip(axes, patterns_order):
+            pat_df = df[(df["pattern"] == pat) & (df[split].notna())].copy()
+            if pat_df.empty:
+                ax.set_title(f"Pattern: {pat} (No Data)", fontweight="bold")
+                ax.axis("off")
+                continue
+                
+            pis = sorted(pat_df["pi"].unique())
+            x_positions = np.arange(len(pis))
+            
+            bar_width = 0.8 / len(models)
+            
+            for i, pi_val in enumerate(pis):
+                pi_df = pat_df[pat_df["pi"] == pi_val].sort_values(by=split, ascending=True)
+                
+                for j, (_, row) in enumerate(pi_df.iterrows()):
+                    model_name = row["model"]
+                    rmse_val = row[split]
+                    offset = (j - len(pi_df) / 2 + 0.5) * bar_width
+                    ax.bar(
+                        i + offset, 
+                        rmse_val, 
+                        width=bar_width, 
+                        color=palette[model_name], 
+                        edgecolor="white",
+                        label=model_name if i == 0 else "" # Only add to legend once per model position inside a group
+                    )
+                    
+                    if annotate:
+                        ax.text(
+                            i + offset, 
+                            rmse_val + (rmse_val * 0.01), 
+                            f"{rmse_val:.4f}", 
+                            ha='center', 
+                            va='bottom', 
+                            rotation=90, 
+                            fontsize=9
+                        )
+            
+            ax.set_xticks(x_positions)
+            ax.set_xticklabels([f"PI={p:g}" for p in pis])
+            ax.set_title(f"Pattern: {pat}", fontweight="bold", fontsize=14)
+            ax.set_ylabel("RMSE")
+            
+            handles, labels = ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            if by_label:
+                ax.legend(by_label.values(), by_label.keys(), title="Models (Sorted by RMSE)", bbox_to_anchor=(1.01, 1), loc="upper left")
+                
+            for spine in ["top", "right"]:
+                ax.spines[spine].set_visible(False)
+                
+        file_path = output_dir / f"baseline_grouped_bar_{split}.png"
         fig.savefig(file_path, dpi=dpi, bbox_inches="tight")
         plt.close(fig)
-        out[f"heatmap_{split}"] = file_path
-
-    # 2) test-average ranking chart.
-    rank_df = (
-        df.groupby("model", as_index=False)["test_rank"].mean().sort_values("test_rank", ascending=True)
-    )
-    fig, ax = plt.subplots(figsize=(8.8, 5.6), constrained_layout=True)
-    sns.barplot(data=rank_df, x="test_rank", y="model", ax=ax, color="#4C78A8")
-    ax.set_title("Model Ranking by Mean Test Rank", fontweight="bold", pad=10)
-    ax.set_xlabel("Mean Test Rank (Lower is Better)")
-    ax.set_ylabel("Model")
-    ax.grid(axis="x", color="#E6E6E6", linewidth=0.8)
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-    for i, v in enumerate(rank_df["test_rank"]):
-        ax.text(v + 0.05, i, f"{v:.2f}", va="center", fontsize=9)
-
-    rank_path = output_dir / f"baseline_rank_test_{run_id}.png"
-    fig.savefig(rank_path, dpi=dpi, bbox_inches="tight")
-    plt.close(fig)
-    out["rank_test"] = rank_path
+        out[f"bar_{split}"] = file_path
 
     return out
