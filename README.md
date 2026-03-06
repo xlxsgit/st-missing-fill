@@ -45,9 +45,30 @@ uv sync
 ### 3. 长时间挂机运行 (推荐)
 对于大规模实验，推荐使用 `nohup` 配合 `caffeinate` 防止 Mac 进入睡眠：
 ```bash
-nohup caffeinate ./run_experiments.sh > experiment.log 2>&1 &
-# 随时查看进度
-tail -f experiment.log
+1. 启动会话
+tmux new -s exp
+
+
+2. 运行实验
+caffeinate ./run_experiments.sh
+
+
+3. 退出但保持运行
+按键：
+Ctrl + b
+d
+
+
+4. 重新进入
+tmux attach -t exp
+
+
+5. 查看会话
+tmux ls
+
+
+6. 结束会话
+tmux kill-session -t exp
 ```
 
 ---

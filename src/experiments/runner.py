@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-windows", type=int, default=None)
     parser.add_argument("--patience", type=int, default=10, help="Number of epochs to wait before early stopping")
     parser.add_argument("--run-name", type=str, default=None)
-    parser.add_argument("--mode", type=str, choices=["train", "test", "all"], default="all", help="Whether to train models, test pre-trained models, or do all.")
+    parser.add_argument("--mode", type=str, choices=["train", "test", "all"], default="all", help="(Deprecated) always runs in all mode.")
     parser.add_argument("--quiet-train", action="store_true")
     parser.add_argument("--knn-chunk-steps", type=int, default=1008)
     parser.add_argument("--mice-chunk-steps", type=int, default=720)
@@ -70,11 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--val-end", type=str, default="2023-02-28")
     parser.add_argument("--test-start", type=str, default="2023-03-01")
     parser.add_argument("--test-end", type=str, default="2023-03-31")
-    
-    # 额外测试参数
-    parser.add_argument("--extra-test-start", type=str, default="2023-04-01")
-    parser.add_argument("--extra-test-end", type=str, default="2023-04-30")
-    
+
     return parser
 
 
@@ -168,8 +164,8 @@ def run_experiments(args, project_root: Path) -> None:
                 "train_end": args.train_end,
                 "val_start": args.val_start,
                 "val_end": args.val_end,
-                "test_start": args.test_start if args.mode != "test" else args.extra_test_start,
-                "test_end": args.test_end if args.mode != "test" else args.extra_test_end
+                "test_start": args.test_start,
+                "test_end": args.test_end
             }
             split_y = split_by_datetime(ground_y, time_index, **split_args)
             print(
@@ -387,12 +383,9 @@ def run_experiments(args, project_root: Path) -> None:
                             )
     
                             for split_name in ["train", "val", "test"]:
-                                # 如果是纯额外测试模式，跳过训练集和验证集的旧图重新评测，这能避免覆盖且节省时间
-                                if args.mode == "test" and split_name != "test":
-                                    continue
-                                
+
                                 split_rmse = rmse_by_split.get(split_name, np.nan)
-                                display_split = "extra_test" if args.mode == "test" and split_name == "test" else split_name
+                                display_split = split_name
                                 rows.append(
                                     {
                                         "model": model_name,

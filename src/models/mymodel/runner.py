@@ -332,12 +332,12 @@ def run_mymodel_on_splits(
                 
             # Ensure we evaluate the best model state instead of the last epoch
             if model_path.exists():
-                model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True))
+                model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True), strict=False)
 
     else: # mode == "test"
         if not model_path.exists():
             raise FileNotFoundError(f"Model file not found for inference: {model_path}. Run with '--mode train' first.")
-        model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True))
+        model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True), strict=False)
         
     train_seconds = time.perf_counter() - t0
     

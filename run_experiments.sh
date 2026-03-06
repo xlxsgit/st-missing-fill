@@ -3,7 +3,6 @@
 # ==========================================
 
 # 🛑 捕获中断信号 (Ctrl+C)，退出时杀死所有子进程
-# 使用 kill 0 可以尝试杀掉当前进程组的所有进程
 trap "echo -e '\n🛑 正在停止实验并清理后台进程...'; kill 0; exit" INT TERM
 
 
@@ -21,36 +20,28 @@ PIS="0.1,0.3,0.5"
 # 4. 数据切分时间范围 (数据量越小跑的越快，但容易让模型欠拟合)
 # Train 范围
 TRAIN_START="2023-01-01"
-TRAIN_END="2023-01-30"
+TRAIN_END="2023-01-31"
 # Val 范围
 VAL_START="2023-02-01"
-VAL_END="2023-02-10"
-# 默认测试 范围 (用于训练过程中和紧随其后的默认评估)
+VAL_END="2023-02-28"
+# Test 范围
 TEST_START="2023-03-01"
-TEST_END="2023-03-10"
+TEST_END="2023-03-31"
 
-# 🚀 5. 额外测试专属时间范围 (当主动执行 ./run_experiments.sh test 时启用)
-EXTRA_TEST_START="2023-04-01"
-EXTRA_TEST_END="2023-04-10"
-
-# 6. 深度学习相关的训练大周期数 (Epochs)
+# 5. 深度学习相关的训练大周期数 (Epochs)
 # 快速测试写 1，要出成果写 10~30
 EPOCHS=5
 
-# 7. 超参数搜索次数 (HPO Trials)
+# 6. 超参数搜索次数 (HPO Trials)
 # 为 0 则关闭模型结构参数搜索 (极速)，如果你想追求更好性能，可以设为 2, 5 甚至 10
 HPO_TRIALS=5
 
-# 8. 早停耐心值 (Patience)
+# 7. 早停耐心值 (Patience)
 # 验证集 RMSE 连续多少个 Epoch 没有下降则触发早停 (Early Stopping)
 PATIENCE=1
 
-# 9. 本次实验文件夹后缀名字
+# 8. 本次实验文件夹后缀名字
 RUN_NAME="xlx"
-
-# 10. 运行模式 (支持外部传入命令参数，例如 ./run_experiments.sh test)
-# train: 只训练模型并保存 | test: 仅加载保存的模型进行推理 | all: 训练+推理
-MODE="${1:-all}"
 
 
 # ==========================================
@@ -61,13 +52,10 @@ echo "=========================================================="
 # Start timing
 START_TIME=$SECONDS
 echo "⚡️ 准备启动实验，将生成的日志名称为: ${RUN_NAME}"
-echo "🕹️ 当前运行模式: ${MODE}"
 echo "📦 模型列表: ${MODELS}"
 echo "📅 训练数据: [${TRAIN_START}] - [${TRAIN_END}]"
-echo "📅 验证/默认测试 : [${VAL_START}] - [${TEST_END}]"
-if [ "${MODE}" = "test" ]; then
-  echo "🚀 额外测试 : [${EXTRA_TEST_START}] - [${EXTRA_TEST_END}]"
-fi
+echo "📅 验证数据: [${VAL_START}] - [${VAL_END}]"
+echo "� 测试数据: [${TEST_START}] - [${TEST_END}]"
 echo "🧩 缺失模式: ${PATTERNS} | 比例: ${PIS}"
 echo "🔄 Epochs: ${EPOCHS} | Patience: ${PATIENCE} | HPO 寻参: ${HPO_TRIALS}次"
 echo "=========================================================="
@@ -83,14 +71,12 @@ uv run python main.py \
   --val-end "${VAL_END}" \
   --test-start "${TEST_START}" \
   --test-end "${TEST_END}" \
-  --extra-test-start "${EXTRA_TEST_START}" \
-  --extra-test-end "${EXTRA_TEST_END}" \
   --epochs "${EPOCHS}" \
   --patience "${PATIENCE}" \
   --hpo-trials "${HPO_TRIALS}" \
   --quiet-train \
   --run-name "${RUN_NAME}" \
-  --mode "${MODE}"
+  --mode "all"
 
 echo "=========================================================="
 echo "✅ 跑批完毕！"

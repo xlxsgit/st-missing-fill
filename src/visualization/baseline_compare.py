@@ -40,7 +40,7 @@ def plot_baseline_comparison(
     df["pattern"] = df["pattern"].str.upper()
     df["pi"] = df["pi"].astype(float)
     
-    available_splits = [s for s in ["train", "val", "test", "extra_test"] if s in df.columns and not df[s].isna().all()]
+    available_splits = [s for s in ["train", "val", "test"] if s in df.columns and not df[s].isna().all()]
     patterns_order = ["MCAR", "SEQ", "SCM"]
     
     models = sorted(df["model"].unique().tolist())

@@ -25,13 +25,11 @@
     "scm_pi_hat": 0.95,
     "hpo_trials": 5,
     "train_start": "2023-01-01",
-    "train_end": "2023-01-30",
+    "train_end": "2023-01-31",
     "val_start": "2023-02-01",
-    "val_end": "2023-02-10",
+    "val_end": "2023-02-28",
     "test_start": "2023-03-01",
-    "test_end": "2023-03-10",
-    "extra_test_start": "2023-04-01",
-    "extra_test_end": "2023-04-10"
+    "test_end": "2023-03-31"
   },
   "models": [
     "mymodel",
@@ -65,15 +63,15 @@
     ],
     "train": [
       112,
-      4320
+      4464
     ],
     "val": [
       112,
-      1440
+      4032
     ],
     "test": [
       112,
-      1440
+      4464
     ]
   }
 }

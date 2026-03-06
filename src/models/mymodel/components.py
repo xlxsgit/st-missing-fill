@@ -25,11 +25,13 @@ class PhysicalAlignmentPriors(nn.Module):
         self.sigma_tau = nn.Parameter(torch.tensor(sigma_tau, dtype=torch.float32))
         
         # Caching for static matrices to prevent O(S^2 * W) repeated trig calculations
-        self.register_buffer("_D_exp", None)
-        self.register_buffer("_azimuth_exp", None)
-        self.register_buffer("_Z_penalty", None)
-        self.register_buffer("_ASPECT_tgt", None)
-        self.register_buffer("_eye", None)
+        # Do NOT use register_buffer as these are batch-dependent shapes that
+        # break load_state_dict when the test batch size differs from train.
+        self._D_exp = None
+        self._azimuth_exp = None
+        self._Z_penalty = None
+        self._ASPECT_tgt = None
+        self._eye = None
         
     def forward(self, topo_features, wind_speed, wind_direction):
         """
