@@ -1,0 +1,15 @@
+{
+    "model_name": "mymodel",
+    "pattern": "scm",
+    "pi": 0.3,
+    "best_hparams": {
+        "d_model": 64,
+        "nhead": 4,
+        "num_layers": 1,
+        "l_lags": 1
+    },
+    "num_params": 108945,
+    "epochs": 5,
+    "batch_size": 64,
+    "window_size": 144
+}

@@ -7,6 +7,7 @@
 
 # 配置文件
 docker/
+.vscode/
 .ini
 .yaml
 .dockerignore
@@ -23,6 +24,7 @@ __pycache__/
 
 # Mac
 .DS_Store
+**/.DS_Store
 
 # 其他
 old_codes/
