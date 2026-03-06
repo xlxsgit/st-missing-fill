@@ -10,6 +10,7 @@ from src.models.utils import prepare_window_data
 def _build_pypots_model(
     model_name: str,
     n_steps: int,
+    n_features: int,
     epochs: int,
     batch_size: int,
     patience: int,
@@ -87,6 +88,7 @@ def run_pypots_deep_on_splits(
     device,
     hparams_override: dict | None = None,
     mode: str = "all",
+    project_root: str | None = None,
     run_dir: str | None = None,
     pattern: str = "mcar",
     pi: float = 0.1,
@@ -185,6 +187,14 @@ def run_pypots_deep_on_splits(
     val_pred = _predict_with_device_fallback(d["y_val_masked_win"]) if mode in ("train", "all") else np.zeros_like(d["y_val_masked_win"])
     test_pred = _predict_with_device_fallback(d["y_test_masked_win"]) if mode in ("test", "all") else np.zeros_like(d["y_test_masked_win"])
     infer_seconds = time.perf_counter() - t1
+    
+    # 强制清理基于 pypots 的 PyTorch 计算图，防止 Mac 内存溢出崩毁
+    import gc
+    del model
+    gc.collect()
+    if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+        torch.mps.empty_cache()
+
     return {
         "train": rmse_on_missing_3d(train_pred, d["y_train_win"], d["train_mask_win"]) if mode in ("train", "all") else np.nan,
         "val": rmse_on_missing_3d(val_pred, d["y_val_win"], d["val_mask_win"]) if mode in ("train", "all") else np.nan,

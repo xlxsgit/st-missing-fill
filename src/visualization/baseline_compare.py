@@ -40,7 +40,7 @@ def plot_baseline_comparison(
     df["pattern"] = df["pattern"].str.upper()
     df["pi"] = df["pi"].astype(float)
     
-    available_splits = [s for s in ["train", "val", "test"] if s in df.columns and not df[s].isna().all()]
+    available_splits = [s for s in ["train", "val", "test", "extra_test"] if s in df.columns and not df[s].isna().all()]
     patterns_order = ["MCAR", "SEQ", "SCM"]
     
     models = sorted(df["model"].unique().tolist())
@@ -99,10 +99,20 @@ def plot_baseline_comparison(
             ax.set_title(f"Pattern: {pat}", fontweight="bold", fontsize=14)
             ax.set_ylabel("RMSE")
             
-            handles, labels = ax.get_legend_handles_labels()
-            by_label = dict(zip(labels, handles))
-            if by_label:
-                ax.legend(by_label.values(), by_label.keys(), title="Models (Sorted by RMSE)", bbox_to_anchor=(1.01, 1), loc="upper left")
+            # Dynamic Y-axis limit to prevent label overflow
+            y_max_val = pi_df[split].max() if not pi_df.empty else 1.0
+            for i, pi_val in enumerate(pis):
+                max_val = pat_df[pat_df["pi"] == pi_val][split].max()
+                if not np.isnan(max_val) and max_val > y_max_val:
+                    y_max_val = max_val
+            ax.set_ylim(0, y_max_val * 1.15)
+            
+            # Only place single legend on the first ax
+            if ax == axes[0]:
+                handles, labels = ax.get_legend_handles_labels()
+                by_label = dict(zip(labels, handles))
+                if by_label:
+                    ax.legend(by_label.values(), by_label.keys(), title="Models (Sorted by RMSE)", bbox_to_anchor=(1.01, 1), loc="upper left")
                 
             for spine in ["top", "right"]:
                 ax.spines[spine].set_visible(False)

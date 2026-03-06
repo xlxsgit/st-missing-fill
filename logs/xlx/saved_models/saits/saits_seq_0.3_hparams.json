@@ -1,0 +1,15 @@
+{
+    "model_name": "saits",
+    "pattern": "seq",
+    "pi": 0.3,
+    "best_hparams": {
+        "n_layers": 2,
+        "d_model": 32,
+        "n_heads": 4,
+        "d_ffn": 64
+    },
+    "num_params": 116886,
+    "epochs": 5,
+    "batch_size": 64,
+    "window_size": 144
+}

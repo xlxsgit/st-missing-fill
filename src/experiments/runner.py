@@ -71,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-start", type=str, default="2023-03-01")
     parser.add_argument("--test-end", type=str, default="2023-03-31")
     
+    # 额外测试参数
+    parser.add_argument("--extra-test-start", type=str, default="2023-04-01")
+    parser.add_argument("--extra-test-end", type=str, default="2023-04-30")
+    
     return parser
 
 
@@ -142,7 +146,13 @@ def run_experiments(args, project_root: Path) -> None:
             print("Args:")
             print(json.dumps(vars(args), indent=2))
 
-            device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+            elif torch.backends.mps.is_available():
+                device = torch.device("mps")
+            else:
+                device = torch.device("cpu")
+
             print(f"Using device: {device}")
 
             ground_X, ground_y, all_stations, all_stations_cluster, vars_info = load_data()
@@ -153,8 +163,8 @@ def run_experiments(args, project_root: Path) -> None:
                 "train_end": args.train_end,
                 "val_start": args.val_start,
                 "val_end": args.val_end,
-                "test_start": args.test_start,
-                "test_end": args.test_end
+                "test_start": args.test_start if args.mode != "test" else args.extra_test_start,
+                "test_end": args.test_end if args.mode != "test" else args.extra_test_end
             }
             split_y = split_by_datetime(ground_y, time_index, **split_args)
             print(
@@ -170,6 +180,23 @@ def run_experiments(args, project_root: Path) -> None:
                 "p0": args.seq_p0,
             }
             scm_params = {"pi_hat": args.scm_pi_hat}
+            
+            # --- Pre-split ground_X to match split_y lengths ---
+            # ground_X is [S, C, Time]. We transpose to [S, Time, C]
+            X_transposed = ground_X.transpose(0, 2, 1)
+            lengths = {
+                'train': split_y['train'].shape[1],
+                'val': split_y['val'].shape[1],
+                'test': split_y['test'].shape[1],
+            }
+            ground_X_splits = {}
+            current_idx = 0
+            for split_name in ['train', 'val', 'test']:
+                L = lengths[split_name]
+                # Keep as [S, Time, C] temporarily, but we need [S, C, Time] passing into mymodel runner later
+                ground_X_splits[split_name] = ground_X[:, :, current_idx : current_idx + L]
+                current_idx += L
+            # --------------------------------------------------
 
             # Suppress pypots warnings
             import warnings
@@ -190,33 +217,81 @@ def run_experiments(args, project_root: Path) -> None:
             rows = []
             combo_idx = 0
             
+            # === 在运行开始时预生成完整的 summary.csv skeleton ===
+            global_summary_path = run_dir / "summary.csv"
+            SUMMARY_COLUMNS = [
+                "RUN_NAME", "模型", "缺失模式", "缺失率",
+                "参数量", "超参数范围", "最优超参数",
+                "epochs", "batch size", "window size",
+                "train 范围", "train rmse",
+                "val 范围", "val rmse",
+                "test 范围", "test rmse",
+                "训练耗时", "推理耗时",
+                "额外测试范围", "额外测试 rmse", "额外推理耗时"
+            ]
+            if not global_summary_path.exists():
+                skeleton_rows = []
+                from src.models.search_space import get_search_bounds
+                for _m in models:
+                    for _p in patterns:
+                        for _pi in pis:
+                            skeleton_rows.append({
+                                "RUN_NAME": run_id,
+                                "模型": _m,
+                                "缺失模式": _p,
+                                "缺失率": _pi,
+                                "参数量": None,
+                                "超参数范围": get_search_bounds(_m),
+                                "最优超参数": "",  # str column: empty string avoids float64 inference
+                                "epochs": args.epochs,
+                                "batch size": args.batch_size,
+                                "window size": args.window_size,
+                                "train 范围": f"{args.train_start} to {args.train_end}",
+                                "train rmse": None,
+                                "val 范围": f"{args.val_start} to {args.val_end}",
+                                "val rmse": None,
+                                "test 范围": f"{args.test_start} to {args.test_end}",
+                                "test rmse": None,
+                                "训练耗时": None,
+                                "推理耗时": None,
+                                "额外测试范围": "",
+                                "额外测试 rmse": None,
+                                "额外推理耗时": None,
+                            })
+                pd.DataFrame(skeleton_rows, columns=SUMMARY_COLUMNS).to_csv(
+                    global_summary_path, index=False, float_format="%.4f"
+                )
+
+            
             with contextlib.nullcontext():
                 print(f"{'Model':<14} | {'Pattern':<9} | {'PI':<5} | {'Test RMSE':<10} | {'Time(s)':<8} | Status")
                 print("-" * 65)
-                for model_name in models:
-                    for pattern in patterns:
-                        for pi in pis:
+                
+                for pattern in patterns:
+                    for pi in pis:
+                        # 1. 为当前的 (pattern, pi) 组合生成掩码
+                        # 这样可以避免一次性持有所有组合的掩码导致内存爆满
+                        mask_seed = None if args.seed is None else args.seed + combo_idx * 1009
+                        masked, masks, split_seed = build_missing_inputs(
+                            split_y,
+                            pattern,
+                            pi,
+                            all_stations_cluster,
+                            mask_seed,
+                            seq_params,
+                            scm_params,
+                        )
+                        
+                        for model_name in models:
                             msg_start = f"{model_name:<14} | {pattern:<9} | {pi:<5.2f} | {'-':<10} | {'-':<8} | ⏳"
                             print(msg_start, end="\r", flush=True)
 
-                            combo_seed = None if args.seed is None else args.seed + combo_idx * 1009
-                            combo_idx += 1
-                            
-                            masked, masks, split_seed = build_missing_inputs(
-                                split_y,
-                                pattern,
-                                pi,
-                                all_stations_cluster,
-                                combo_seed,
-                                seq_params,
-                                scm_params,
-                            )
                             # ========= HPO Objective ==========
                             best_hparams = None
+                            hpo_seconds = 0.0  # Track time spent in HPO
                             if args.hpo_trials > 0 and args.mode in ("train", "all"):
                                 from src.models.search_space import has_search_space
                                 if has_search_space(model_name):
-                                    print(f"*** Starting HPO for {model_name} with {args.hpo_trials} trials ***")
                                     
                                     def objective(trial: optuna.Trial) -> float:
                                         # 1. 抽取超参
@@ -240,24 +315,35 @@ def run_experiments(args, project_root: Path) -> None:
                                             mice_max_iter=hparams.get("mice_max_iter", args.mice_max_iter),
                                             mice_tol=hparams.get("mice_tol", args.mice_tol),
                                             mice_quiet_warnings=True, # HPO强制静音mice
-                                            hparams_override=hparams,
-                                            mode="train",
-                                            project_root=project_root,
                                             run_dir=run_dir,
                                             pattern=pattern,
-                                            pi=pi
+                                            pi=pi,
+                                            ground_X_splits=ground_X_splits, 
+                                            all_stations=all_stations,      
+                                            vars_info=vars_info,            
                                         )
                                         # 3. 目标为最小化在【验证集】上的 RMSE
-                                        return rmse["val"]
+                                        val_rmse = rmse["val"]
+                                        
+                                        import gc
+                                        gc.collect()
+                                        if hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
+                                            torch.mps.empty_cache()
+                                            
+                                        return val_rmse
                                     
-                                    study = optuna.create_study(direction="minimize")
-                                    # 屏蔽 optuna 过多的INFO, 开启Error
+                                    import time as _time
+                                    _t_hpo_start = _time.perf_counter()
                                     optuna.logging.set_verbosity(optuna.logging.WARNING)
+                                    study = optuna.create_study(direction="minimize")
                                     study.optimize(objective, n_trials=args.hpo_trials)
-                                    best_hparams = study.best_params
-                                    print(f"*** HPO Finished. Best Val RMSE: {study.best_value:.4f} with params: {best_hparams} ***")
+                                    hpo_seconds = _time.perf_counter() - _t_hpo_start
+                                    try:
+                                        best_hparams = study.best_params
+                                    except ValueError:
+                                        best_hparams = None
                                 else:
-                                    print(f"*** Skipped HPO for {model_name} (no search space defined) ***")
+                                    pass # Ignore skipping message to keep progress bar clean
     
                             # ========= 最终模型运行与测试 ==========
                             rmse_by_split, timing = run_baseline_on_splits(
@@ -283,27 +369,32 @@ def run_experiments(args, project_root: Path) -> None:
                                 project_root=project_root,
                                 run_dir=run_dir,
                                 pattern=pattern,
-                                pi=pi
+                                pi=pi,
+                                ground_X_splits=ground_X_splits, # Add new param
+                                all_stations=all_stations,       # Add new param
+                                vars_info=vars_info,             # Add new param
                             )
     
                             for split_name in ["train", "val", "test"]:
                                 split_rmse = rmse_by_split.get(split_name, np.nan)
+                                display_split = "extra_test" if args.mode == "test" and split_name == "test" else split_name
                                 rows.append(
                                     {
                                         "model": model_name,
                                         "pattern": pattern,
                                         "pi": pi,
-                                        "split": split_name,
+                                        "split": display_split,
                                         "rmse": split_rmse,
                                         "missing_rate": float((masks[split_name] == 0).mean()),
                                         "split_seed": split_seed[split_name],
-                                        "total_seconds": float(timing["total_seconds"]),
+                                        "total_seconds": float(timing["total_seconds"] + hpo_seconds),
                                     }
                                 )
     
                             test_rmse = rmse_by_split.get('test', np.nan)
                             test_rmse_str = f"{test_rmse:<10.4f}" if not np.isnan(test_rmse) else f"{'N/A':<10}"
-                            msg_done = f"{model_name:<14} | {pattern:<9} | {pi:<5.2f} | {test_rmse_str} | {timing['total_seconds']:<8.2f} | ✅"
+                            total_time_incl_hpo = timing['total_seconds'] + hpo_seconds
+                            msg_done = f"{model_name:<14} | {pattern:<9} | {pi:<5.2f} | {test_rmse_str} | {total_time_incl_hpo:<8.2f} | ✅"
                             print(msg_done, flush=True)
                             
                             # [INCREMENTAL SAVE] 递增存档以防止中断
@@ -319,9 +410,7 @@ def run_experiments(args, project_root: Path) -> None:
                                 project_root, run_dir, run_id, vars(args), models, patterns, pis, shape_info, df
                             )
     
-                            # 全量总结大双追加
-                            global_summary_path = run_dir / "summary_all_parts.csv"
-                            
+                            # Update summary.csv with completed results
                             hp_path = run_dir / "saved_models" / model_name / f"{model_name}_{pattern}_{pi}_hparams.json"
                             num_params = 0
                             hparam_str = "N/A"
@@ -341,7 +430,7 @@ def run_experiments(args, project_root: Path) -> None:
                             val_rmse = rmse_by_split.get("val", np.nan)
                             test_rmse = rmse_by_split.get("test", np.nan)
                             
-                            train_time = timing["train_seconds"]
+                            train_time = timing["train_seconds"] + hpo_seconds  # HPO时间计入训练耗时
                             test_time = timing["infer_seconds"]
                             
                             new_row = {
@@ -389,13 +478,34 @@ def run_experiments(args, project_root: Path) -> None:
                                     if pd.notna(val_rmse):
                                         df_global.loc[idx, "val rmse"] = val_rmse
                                     df_global.loc[idx, "训练耗时"] = float(train_time)
-                                if args.mode in ("test", "all"):
+                                    
+                                    # Write standard test columns during train/all
                                     df_global.loc[idx, "test 范围"] = new_row["test 范围"]
                                     if pd.notna(test_rmse):
                                         df_global.loc[idx, "test rmse"] = test_rmse
                                     df_global.loc[idx, "推理耗时"] = float(test_time)
                                     
+                                elif args.mode == "test":
+                                    # "Extra test" run - keep original training data, only update extra columns
+                                    df_global.loc[idx, "额外测试范围"] = new_row["test 范围"]
+                                    if pd.notna(test_rmse):
+                                        df_global.loc[idx, "额外测试 rmse"] = test_rmse
+                                    df_global.loc[idx, "额外推理耗时"] = float(test_time)
+                                    
                             df_global.to_csv(global_summary_path, index=False, float_format="%.4f")
+                            
+                            # 极致压缩内存：在尝试完每个(模型,缺失模式,比例)的组合后，强行清理内存回收废弃网络图
+                            import gc
+                            gc.collect()
+                            if hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
+                                torch.mps.empty_cache()
+                            
+                            combo_idx += 1
+
+                        # 清理当前组合的掩码内存
+                        del masked, masks
+                        import gc
+                        gc.collect()
 
                 print("🏁 All combinations completed!")
 

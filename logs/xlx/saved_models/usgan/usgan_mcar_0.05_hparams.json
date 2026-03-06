@@ -1,0 +1,12 @@
+{
+    "model_name": "usgan",
+    "pattern": "mcar",
+    "pi": 0.05,
+    "best_hparams": {
+        "rnn_hidden_size": 64
+    },
+    "num_params": 61457,
+    "epochs": 1,
+    "batch_size": 64,
+    "window_size": 144
+}

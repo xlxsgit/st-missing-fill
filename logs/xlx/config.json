@@ -1,0 +1,80 @@
+{
+  "args": {
+    "models": "mymodel,vcaan,locf,knn,mice,saits,itransformer,grud",
+    "patterns": "mcar,seq,scm",
+    "pis": "0.1,0.3,0.5,0.7",
+    "seed": null,
+    "window_size": 144,
+    "epochs": 5,
+    "batch_size": 64,
+    "max_windows": null,
+    "patience": 1,
+    "run_name": "xlx",
+    "mode": "all",
+    "quiet_train": true,
+    "knn_chunk_steps": 1008,
+    "mice_chunk_steps": 720,
+    "knn_neighbors": 5,
+    "mice_max_iter": 8,
+    "mice_tol": 0.001,
+    "mice_show_warnings": false,
+    "seq_n1": 24,
+    "seq_p1": 0.5,
+    "seq_l_obse_base": 10,
+    "seq_p0": 0.5,
+    "scm_pi_hat": 0.95,
+    "hpo_trials": 2,
+    "train_start": "2023-01-01",
+    "train_end": "2023-01-31",
+    "val_start": "2023-02-01",
+    "val_end": "2023-02-28",
+    "test_start": "2023-03-01",
+    "test_end": "2023-03-31",
+    "extra_test_start": "2023-04-01",
+    "extra_test_end": "2023-04-30"
+  },
+  "models": [
+    "mymodel",
+    "vcaan",
+    "locf",
+    "knn",
+    "mice",
+    "saits",
+    "itransformer",
+    "grud"
+  ],
+  "patterns": [
+    "mcar",
+    "seq",
+    "scm"
+  ],
+  "pis": [
+    0.1,
+    0.3,
+    0.5,
+    0.7
+  ],
+  "shape": {
+    "ground_X": [
+      112,
+      7,
+      105264
+    ],
+    "ground_y": [
+      112,
+      105264
+    ],
+    "train": [
+      112,
+      4464
+    ],
+    "val": [
+      112,
+      4032
+    ],
+    "test": [
+      112,
+      4464
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+    "model_name": "itransformer",
+    "pattern": "mcar",
+    "pi": 0.1,
+    "best_hparams": {
+        "n_layers": 4,
+        "d_model": 32,
+        "n_heads": 2,
+        "d_ffn": 128
+    },
+    "num_params": 67632,
+    "epochs": 5,
+    "batch_size": 64,
+    "window_size": 144
+}

@@ -42,6 +42,9 @@ def run_baseline_on_splits(
     run_dir: str | None = None,
     pattern: str = "mcar",
     pi: float = 0.1,
+    ground_X_splits: dict | None = None,
+    all_stations: list | None = None,
+    vars_info: dict | None = None,
 ) -> tuple[dict[str, float], dict[str, float]]:
     model_name = model_name.lower()
     fast_y, fast_masked, fast_masks = truncate_splits_for_fast_run(
@@ -108,5 +111,8 @@ def run_baseline_on_splits(
             run_dir=run_dir,
             pattern=pattern,
             pi=pi,
+            ground_X_splits=ground_X_splits,
+            all_stations=all_stations,
+            vars_info=vars_info,
         )
     raise ValueError(f"Unknown model: {model_name}")

@@ -1,0 +1,12 @@
+{
+    "model_name": "knn",
+    "pattern": "seq",
+    "pi": 0.7,
+    "best_hparams": {
+        "knn_neighbors": 5,
+        "mice_max_iter": 8,
+        "mice_tol": 0.001
+    },
+    "num_params": 0,
+    "epochs": 0
+}

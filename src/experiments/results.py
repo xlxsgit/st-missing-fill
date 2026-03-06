@@ -16,14 +16,11 @@ def save_experiment_results(
     shape_info: dict,
     df_long: pd.DataFrame,
 ) -> None:
-    """Save all artifacts for a run: CSVs, pivot tables, logs, configs, metrics."""
-    # 1. Long results
+    """Save experiment artifacts: config.json, metrics.json, and visualization."""
     if "combo_seed" in df_long.columns:
         df_long = df_long.drop(columns=["combo_seed"])
-    result_csv = run_dir / "results_long.csv"
-    df_long.to_csv(result_csv, index=False, float_format="%.4f")
 
-    # 2. Pivot results
+    # Build pivot for internal use (visualization / metrics)
     pivot = (
         df_long.pivot_table(
             index=["model", "pattern", "pi"],
@@ -34,29 +31,12 @@ def save_experiment_results(
         .reset_index()
         .sort_values(["model", "pattern", "pi"])
     )
-    pivot_csv = run_dir / "results_pivot.csv"
-    pivot.to_csv(pivot_csv, index=False, float_format="%.4f")
 
-    # 3. Timing summary
-    timing_pivot = (
-        df_long.groupby(["model", "pattern", "pi"], as_index=False)[
-            ["total_seconds"]
-        ]
-        .first()
-        .sort_values(["model", "pattern", "pi"])
-    )
-    timing_csv = run_dir / "timing_summary.csv"
-    timing_pivot.to_csv(timing_csv, index=False, float_format="%.4f")
-
-    # 4. Remove global summary as requested, we keep everything inside run_dir.
-    summary_df = pivot.copy()
-    summary_df = summary_df.merge(timing_pivot, on=["model", "pattern", "pi"], how="left")
-    
-    # 5. Generate validation figures locally inside run_dir
+    # Generate validation figures locally inside run_dir
     from src.visualization.baseline_compare import plot_baseline_comparison
-    plot_baseline_comparison(summary_df, output_dir=run_dir, run_id=run_id)
+    plot_baseline_comparison(pivot, output_dir=run_dir, run_id=run_id)
 
-    # 5. Configs
+    # Configs
     config_json = run_dir / "config.json"
     with config_json.open("w", encoding="utf-8") as f:
         json.dump(
@@ -72,7 +52,7 @@ def save_experiment_results(
             indent=2,
         )
 
-    # 6. Metrics
+    # Metrics
     metrics_json = run_dir / "metrics.json"
     with metrics_json.open("w", encoding="utf-8") as f:
         json.dump(
@@ -88,5 +68,3 @@ def save_experiment_results(
             ensure_ascii=False,
             indent=2,
         )
-
-    # Removed verbose log lines for incremental saves to keep console clean

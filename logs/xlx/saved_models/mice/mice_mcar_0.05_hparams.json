@@ -1,0 +1,12 @@
+{
+    "model_name": "mice",
+    "pattern": "mcar",
+    "pi": 0.05,
+    "best_hparams": {
+        "knn_neighbors": 5,
+        "mice_max_iter": 8,
+        "mice_tol": 0.001
+    },
+    "num_params": 0,
+    "epochs": 8
+}

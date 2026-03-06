@@ -1,3 +1,4 @@
+from __future__ import annotations
 import time
 import numpy as np
 import torch
@@ -7,7 +8,6 @@ import pandas as pd
 
 from src.evaluate import rmse_on_missing_2d, rmse_on_missing_3d
 from src.models.mymodel.model import STAT_Model
-from src.data.load import load_data
 
 
 def build_topo_features(all_stations: list) -> torch.Tensor:
@@ -70,7 +70,7 @@ def prepare_spatial_windows(y_2d: np.ndarray, window_size: int, max_windows: int
 
 
 def build_spatial_dataloader(split_y: np.ndarray, split_masked: np.ndarray, split_masks: np.ndarray, 
-                             ground_X_split: np.ndarray, topo_features: torch.Tensor, wind_dir_idx: int, 
+                             X_win: np.ndarray, topo_features: torch.Tensor, wind_dir_idx: int, 
                              window_size: int, batch_size: int, shuffle: bool, max_windows: int = None):
     """
     ground_X_split: [Stations, Timesteps, Covariates]
@@ -84,21 +84,7 @@ def build_spatial_dataloader(split_y: np.ndarray, split_masked: np.ndarray, spli
     Y_raw_win = prepare_spatial_windows(split_masked, window_size, max_windows)           # [B, S, W]
     mask_win = prepare_spatial_windows(split_masks, window_size, max_windows)             # [B, S, W]
     
-    # 2. Covariates processing (ground_X -> [S, T, Covariates])
-    # Need to reshape `ground_X_split` -> [B, S, W, Covariates]
-    S, T, C = ground_X_split.shape
-    usable_steps = (T // window_size) * window_size
-    X_trim = ground_X_split[:, :usable_steps, :]
-    
-    # reshape to [S, Num_Windows, W, C]
-    X_reshape = X_trim.reshape(S, -1, window_size, C)
-    
-    # transpose to [Num_Windows, S, W, C]
-    X_win = X_reshape.transpose(1, 0, 2, 3) 
-    
-    if max_windows is not None:
-        X_win = X_win[:max(1, max_windows)]
-    X_win = X_win.astype(np.float32)
+    # 2. Covariates processing (X_win is already [Num_Windows, S, W, C])
     
     # 3. Separate Wind Direction (assuming wind_dir_idx is known)
     wind_dir_win = X_win[..., wind_dir_idx] # [B, S, W]
@@ -147,6 +133,9 @@ def run_mymodel_on_splits(
     split_y: dict,
     split_masked: dict,
     split_masks: dict,
+    ground_X_splits: dict, # Added to prevent duplicate reloading
+    all_stations: list,    # Added
+    vars_info: dict,       # Added
     device,
     window_size: int,
     epochs: int,
@@ -163,8 +152,6 @@ def run_mymodel_on_splits(
 ) -> tuple[dict[str, float], dict[str, float]]:
     
     # 1. Load static topography and covariates
-    ground_X, _, all_stations, _, vars_info = load_data()
-    # Find wind direction index in X covariates
     wind_dir_idx = vars_info['x'].index('wind_direction') if 'wind_direction' in vars_info['x'] else 0
     num_covariates = len(vars_info['x'])
     
@@ -172,25 +159,25 @@ def run_mymodel_on_splits(
     topo_features = build_topo_features(all_stations).to(device)
     num_stations = len(all_stations)
     
-    # Determine the time splits for ground_X to match split_y lengths
-    # (Since split_y is already sliced by time)
-    # We will slice ground_X based on the shape of split_y
-    lengths = {
-        'train': split_y['train'].shape[1],
-        'val': split_y['val'].shape[1],
-        'test': split_y['test'].shape[1],
-    }
-    
-    X_splits = {}
-    current_idx = 0
-    # ground_X is [S, C, Time]. We transpose to [S, Time, C]
-    X_transposed = ground_X.transpose(0, 2, 1)
-    
+    # ground_X_splits already contains time-sliced X for each split
+    # ground_X_splits[split_name] is [S, C, T]. We need it to be [Num_Windows, S, W, C]
+    X_win_splits = {}
     for split_name in ['train', 'val', 'test']:
-        L = lengths[split_name]
-        X_splits[split_name] = X_transposed[:, current_idx : current_idx + L, :]
-        current_idx += L
-
+        X_split = ground_X_splits[split_name] # [S, C, T]
+        S, C, T = X_split.shape
+        usable_steps = (T // window_size) * window_size
+        X_trim = X_split[:, :, :usable_steps] # [S, C, UsableT]
+        
+        # reshape to [S, C, Num_Windows, W]
+        X_reshape = X_trim.reshape(S, C, -1, window_size)
+        
+        # transpose to [Num_Windows, S, W, C]
+        X_win = X_reshape.transpose(2, 0, 3, 1)
+        
+        if max_windows is not None:
+            X_win = X_win[:max(1, max_windows)]
+        X_win_splits[split_name] = X_win.astype(np.float32)
+        
     # 2. Build DataLoaders
     # Enforce a maximum batch size for mymodel to prevent MPS OOM during Transformer autograd
     effective_batch_size = min(batch_size, 8)
@@ -201,7 +188,7 @@ def run_mymodel_on_splits(
             split_y=split_y[split_name],
             split_masked=split_masked[split_name],
             split_masks=split_masks[split_name],
-            ground_X_split=X_splits[split_name],
+            X_win=X_win_splits[split_name],
             topo_features=topo_features,
             wind_dir_idx=wind_dir_idx,
             window_size=window_size,
@@ -353,6 +340,13 @@ def run_mymodel_on_splits(
     
     infer_seconds = time.perf_counter() - t1
     
+    # 极致清理：在预测结束后，由于已经拿到了 numpy 结果，可以销毁所有 DataLoader 和 Tensor
+    del loaders, X_win_splits, topo_features, model
+    import gc
+    gc.collect()
+    if hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
+        torch.mps.empty_cache()
+
     # 6. Calculate True RMSE
     # Need to match the exact truncated length that predict_split returned
     # because the DataLoader drops the last partial window

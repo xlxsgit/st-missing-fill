@@ -67,6 +67,7 @@ def run_sklearn_on_splits(
                     max_iter=mice_max_iter,
                     tol=mice_tol,
                 )
+            else:
                 raise ValueError(f"Unknown sklearn baseline {algo}")
 
             # For chunked ML models, we'll only do inference if mode == 'test'.
