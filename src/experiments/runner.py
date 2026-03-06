@@ -266,6 +266,19 @@ def run_experiments(args, project_root: Path) -> None:
                 df_skeleton.to_csv(
                     global_summary_path, index=False, float_format="%.4f"
                 )
+            # Keep a single in-memory summary table to avoid per-model full CSV reload.
+            if global_summary_path.exists():
+                df_global = pd.read_csv(global_summary_path, dtype={
+                    "最优超参数": "object",
+                    "train 范围": "object",
+                    "val 范围": "object",
+                    "test 范围": "object",
+                    "额外测试范围": "object"
+                })
+            else:
+                df_global = pd.DataFrame(columns=SUMMARY_COLUMNS)
+                for col in ["最优超参数", "train 范围", "val 范围", "test 范围", "额外测试范围"]:
+                    df_global[col] = df_global[col].astype("object")
 
             
             with contextlib.nullcontext():
@@ -332,9 +345,12 @@ def run_experiments(args, project_root: Path) -> None:
                                         # 3. 目标为最小化在【验证集】上的 RMSE
                                         val_rmse = rmse["val"]
                                         
-                                        import gc
-                                        gc.collect()
-                                        if hasattr(torch, 'mps') and hasattr(torch.mps, 'empty_cache'):
+                                        # Avoid expensive full GC every trial; only lightly trim MPS cache periodically.
+                                        if (
+                                            hasattr(torch, "mps")
+                                            and hasattr(torch.mps, "empty_cache")
+                                            and (trial.number + 1) % 2 == 0
+                                        ):
                                             torch.mps.empty_cache()
                                             
                                         return val_rmse
@@ -462,21 +478,6 @@ def run_experiments(args, project_root: Path) -> None:
                                 "推理耗时": float(test_time)
                             }
                             
-                            if global_summary_path.exists():
-                                # 强制对包含字符串内容的列用 object 类型读取，防止 pandas 把空列错误推断为 float64
-                                df_global = pd.read_csv(global_summary_path, dtype={
-                                    "最优超参数": "object",
-                                    "train 范围": "object",
-                                    "val 范围": "object",
-                                    "test 范围": "object",
-                                    "额外测试范围": "object"
-                                })
-                            else:
-                                df_global = pd.DataFrame(columns=new_row.keys())
-                                # 同样在初次创建时确保列类型正确
-                                for col in ["最优超参数", "train 范围", "val 范围", "test 范围", "额外测试范围"]:
-                                    df_global[col] = df_global[col].astype("object")
-                                
                             mask = (df_global.get("RUN_NAME") == run_id) & \
                                    (df_global.get("模型") == model_name) & \
                                    (df_global.get("缺失模式") == pattern) & \

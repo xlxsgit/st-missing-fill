@@ -2,8 +2,16 @@
 
 # ==========================================
 
-# 🛑 捕获中断信号 (Ctrl+C)，退出时杀死所有子进程
-trap "echo -e '\n🛑 正在停止实验并清理后台进程...'; kill 0; exit" INT TERM
+# 捕获中断信号 (Ctrl+C): 仅终止本脚本拉起的子进程并静默退出
+cleanup() {
+  trap - INT TERM
+  pkill -TERM -P "$$" 2>/dev/null || true
+  sleep 0.2
+  pkill -KILL -P "$$" 2>/dev/null || true
+  wait 2>/dev/null || true
+  exit 130
+}
+trap cleanup INT TERM
 
 
 # 1. 想要运行的模型 (用逗号分隔，不要有空格)

@@ -3,9 +3,9 @@
     "pattern": "scm",
     "pi": 0.3,
     "best_hparams": {
-        "n_layers": 4,
+        "n_layers": 2,
         "d_model": 32,
-        "n_heads": 2,
+        "n_heads": 4,
         "d_ffn": 128
     },
     "num_params": 116886,

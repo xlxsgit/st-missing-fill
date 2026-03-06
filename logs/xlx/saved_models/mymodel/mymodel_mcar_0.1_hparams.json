@@ -3,12 +3,12 @@
     "pattern": "mcar",
     "pi": 0.1,
     "best_hparams": {
-        "d_model": 64,
+        "d_model": 128,
         "nhead": 2,
-        "num_layers": 1,
+        "num_layers": 3,
         "l_lags": 4
     },
-    "num_params": 109725,
+    "num_params": 1209117,
     "epochs": 5,
     "batch_size": 64,
     "window_size": 144
