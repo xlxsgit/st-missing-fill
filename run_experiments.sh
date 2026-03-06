@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # ==========================================
-# 🚀 快速跑批实验启动脚本 (Fast Experiment Runner)
-# ==========================================
-# 你只需要在这里修改参数，然后在这个项目根目录下运行: 
-# ./run_experiments.sh [可选参数: train | test | all(默认)]
-# ==========================================
+
+# 🛑 捕获中断信号 (Ctrl+C)，退出时杀死所有子进程
+# 使用 kill 0 可以尝试杀掉当前进程组的所有进程
+trap "echo -e '\n🛑 正在停止实验并清理后台进程...'; kill 0; exit" INT TERM
+
 
 # 1. 想要运行的模型 (用逗号分隔，不要有空格)
 # 可选项: mymodel,vcaan,locf,knn,mice,saits,itransformer,grud,usgan(❌，太慢了)
@@ -16,22 +16,22 @@ MODELS="mymodel,vcaan,locf,knn,mice,saits,itransformer,grud"
 PATTERNS="mcar,seq,scm"
 
 # 3. 缺失率 (用逗号分隔，不要有空格，结尾不要留逗号)
-PIS="0.1,0.3,0.5,0.7"
+PIS="0.1,0.3,0.5"
 
 # 4. 数据切分时间范围 (数据量越小跑的越快，但容易让模型欠拟合)
 # Train 范围
 TRAIN_START="2023-01-01"
-TRAIN_END="2023-01-31"
+TRAIN_END="2023-01-30"
 # Val 范围
 VAL_START="2023-02-01"
-VAL_END="2023-02-28"
+VAL_END="2023-02-10"
 # 默认测试 范围 (用于训练过程中和紧随其后的默认评估)
 TEST_START="2023-03-01"
-TEST_END="2023-03-31"
+TEST_END="2023-03-10"
 
 # 🚀 5. 额外测试专属时间范围 (当主动执行 ./run_experiments.sh test 时启用)
 EXTRA_TEST_START="2023-04-01"
-EXTRA_TEST_END="2023-04-30"
+EXTRA_TEST_END="2023-04-10"
 
 # 6. 深度学习相关的训练大周期数 (Epochs)
 # 快速测试写 1，要出成果写 10~30
@@ -39,7 +39,7 @@ EPOCHS=5
 
 # 7. 超参数搜索次数 (HPO Trials)
 # 为 0 则关闭模型结构参数搜索 (极速)，如果你想追求更好性能，可以设为 2, 5 甚至 10
-HPO_TRIALS=2
+HPO_TRIALS=5
 
 # 8. 早停耐心值 (Patience)
 # 验证集 RMSE 连续多少个 Epoch 没有下降则触发早停 (Early Stopping)

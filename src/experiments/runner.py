@@ -94,6 +94,7 @@ def build_missing_inputs(
     base_seed: int | None,
     seq_params: dict,
     scm_params: dict,
+    mode: str = "all",
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, int]]:
     rng = np.random.default_rng(base_seed)
     split_seed = {
@@ -104,15 +105,19 @@ def build_missing_inputs(
     masked = {}
     masks = {}
     for split_name in ["train", "val", "test"]:
-        y_masked, mask = simulate_missingness(
-            split_y[split_name],
-            pi,
-            pattern,
-            S_cluster=clusters if pattern == "scm" else None,
-            seed=split_seed[split_name],
-            seq_params=seq_params,
-            scm_params=scm_params,
-        )
+        if mode == "test" and split_name != "test":
+            y_masked = split_y[split_name][..., np.newaxis]
+            mask = np.ones_like(split_y[split_name], dtype=int)
+        else:
+            y_masked, mask = simulate_missingness(
+                split_y[split_name],
+                pi,
+                pattern,
+                S_cluster=clusters if pattern == "scm" else None,
+                seed=split_seed[split_name],
+                seq_params=seq_params,
+                scm_params=scm_params,
+            )
         masked[split_name] = y_masked
         masks[split_name] = mask
     return masked, masks, split_seed
@@ -258,7 +263,11 @@ def run_experiments(args, project_root: Path) -> None:
                                 "额外测试 rmse": None,
                                 "额外推理耗时": None,
                             })
-                pd.DataFrame(skeleton_rows, columns=SUMMARY_COLUMNS).to_csv(
+                df_skeleton = pd.DataFrame(skeleton_rows, columns=SUMMARY_COLUMNS)
+                # 显式声明特定列为 object (字符串混合) 类型，避免后续填入数据时触发 dtype warning
+                for col in ["最优超参数", "train 范围", "val 范围", "test 范围", "额外测试范围"]:
+                    df_skeleton[col] = df_skeleton[col].astype("object")
+                df_skeleton.to_csv(
                     global_summary_path, index=False, float_format="%.4f"
                 )
 
@@ -280,6 +289,7 @@ def run_experiments(args, project_root: Path) -> None:
                             mask_seed,
                             seq_params,
                             scm_params,
+                            args.mode,
                         )
                         
                         for model_name in models:
@@ -320,7 +330,8 @@ def run_experiments(args, project_root: Path) -> None:
                                             pi=pi,
                                             ground_X_splits=ground_X_splits, 
                                             all_stations=all_stations,      
-                                            vars_info=vars_info,            
+                                            vars_info=vars_info,
+                                            mode="hpo",
                                         )
                                         # 3. 目标为最小化在【验证集】上的 RMSE
                                         val_rmse = rmse["val"]
@@ -376,6 +387,10 @@ def run_experiments(args, project_root: Path) -> None:
                             )
     
                             for split_name in ["train", "val", "test"]:
+                                # 如果是纯额外测试模式，跳过训练集和验证集的旧图重新评测，这能避免覆盖且节省时间
+                                if args.mode == "test" and split_name != "test":
+                                    continue
+                                
                                 split_rmse = rmse_by_split.get(split_name, np.nan)
                                 display_split = "extra_test" if args.mode == "test" and split_name == "test" else split_name
                                 rows.append(
@@ -455,9 +470,19 @@ def run_experiments(args, project_root: Path) -> None:
                             }
                             
                             if global_summary_path.exists():
-                                df_global = pd.read_csv(global_summary_path)
+                                # 强制对包含字符串内容的列用 object 类型读取，防止 pandas 把空列错误推断为 float64
+                                df_global = pd.read_csv(global_summary_path, dtype={
+                                    "最优超参数": "object",
+                                    "train 范围": "object",
+                                    "val 范围": "object",
+                                    "test 范围": "object",
+                                    "额外测试范围": "object"
+                                })
                             else:
                                 df_global = pd.DataFrame(columns=new_row.keys())
+                                # 同样在初次创建时确保列类型正确
+                                for col in ["最优超参数", "train 范围", "val 范围", "test 范围", "额外测试范围"]:
+                                    df_global[col] = df_global[col].astype("object")
                                 
                             mask = (df_global.get("RUN_NAME") == run_id) & \
                                    (df_global.get("模型") == model_name) & \

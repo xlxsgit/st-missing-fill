@@ -2,7 +2,7 @@
   "args": {
     "models": "mymodel,vcaan,locf,knn,mice,saits,itransformer,grud",
     "patterns": "mcar,seq,scm",
-    "pis": "0.1,0.3,0.5,0.7",
+    "pis": "0.1,0.3,0.5",
     "seed": null,
     "window_size": 144,
     "epochs": 5,
@@ -23,15 +23,15 @@
     "seq_l_obse_base": 10,
     "seq_p0": 0.5,
     "scm_pi_hat": 0.95,
-    "hpo_trials": 2,
+    "hpo_trials": 5,
     "train_start": "2023-01-01",
-    "train_end": "2023-01-31",
+    "train_end": "2023-01-30",
     "val_start": "2023-02-01",
-    "val_end": "2023-02-28",
+    "val_end": "2023-02-10",
     "test_start": "2023-03-01",
-    "test_end": "2023-03-31",
+    "test_end": "2023-03-10",
     "extra_test_start": "2023-04-01",
-    "extra_test_end": "2023-04-30"
+    "extra_test_end": "2023-04-10"
   },
   "models": [
     "mymodel",
@@ -51,8 +51,7 @@
   "pis": [
     0.1,
     0.3,
-    0.5,
-    0.7
+    0.5
   ],
   "shape": {
     "ground_X": [
@@ -66,15 +65,15 @@
     ],
     "train": [
       112,
-      4464
+      4320
     ],
     "val": [
       112,
-      4032
+      1440
     ],
     "test": [
       112,
-      4464
+      1440
     ]
   }
 }

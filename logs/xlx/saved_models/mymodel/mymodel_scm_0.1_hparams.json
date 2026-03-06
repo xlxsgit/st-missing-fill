@@ -3,12 +3,12 @@
     "pattern": "scm",
     "pi": 0.1,
     "best_hparams": {
-        "d_model": 128,
-        "nhead": 8,
+        "d_model": 64,
+        "nhead": 2,
         "num_layers": 3,
-        "l_lags": 2
+        "l_lags": 3
     },
-    "num_params": 1208085,
+    "num_params": 309401,
     "epochs": 5,
     "batch_size": 64,
     "window_size": 144

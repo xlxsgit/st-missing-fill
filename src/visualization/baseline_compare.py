@@ -49,16 +49,13 @@ def plot_baseline_comparison(
     out = {}
 
     for split in available_splits:
-        fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 16), constrained_layout=True)
+        fig, axes = plt.subplots(nrows=3, ncols=1, figsize=(14, 8), constrained_layout=True)
         if not isinstance(axes, (list, np.ndarray)):
             axes = [axes]
             
-        fig.suptitle(f"{split.capitalize()} RMSE Comparison", fontsize=18, fontweight="bold")
-        
         for ax, pat in zip(axes, patterns_order):
             pat_df = df[(df["pattern"] == pat) & (df[split].notna())].copy()
             if pat_df.empty:
-                ax.set_title(f"Pattern: {pat} (No Data)", fontweight="bold")
                 ax.axis("off")
                 continue
                 
@@ -96,8 +93,7 @@ def plot_baseline_comparison(
             
             ax.set_xticks(x_positions)
             ax.set_xticklabels([f"PI={p:g}" for p in pis])
-            ax.set_title(f"Pattern: {pat}", fontweight="bold", fontsize=14)
-            ax.set_ylabel("RMSE")
+            ax.set_ylabel(f"RMSE ({pat})", fontweight="bold")
             
             # Dynamic Y-axis limit to prevent label overflow
             y_max_val = pi_df[split].max() if not pi_df.empty else 1.0
@@ -112,12 +108,12 @@ def plot_baseline_comparison(
                 handles, labels = ax.get_legend_handles_labels()
                 by_label = dict(zip(labels, handles))
                 if by_label:
-                    ax.legend(by_label.values(), by_label.keys(), title="Models (Sorted by RMSE)", bbox_to_anchor=(1.01, 1), loc="upper left")
+                    ax.legend(by_label.values(), by_label.keys(), title="Models", bbox_to_anchor=(1.01, 1), loc="upper left")
                 
             for spine in ["top", "right"]:
                 ax.spines[spine].set_visible(False)
                 
-        file_path = output_dir / f"baseline_grouped_bar_{split}.png"
+        file_path = output_dir / f"{split}.png"
         fig.savefig(file_path, dpi=dpi, bbox_inches="tight")
         plt.close(fig)
         out[f"bar_{split}"] = file_path

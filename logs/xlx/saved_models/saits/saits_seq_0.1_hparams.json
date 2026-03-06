@@ -4,8 +4,8 @@
     "pi": 0.1,
     "best_hparams": {
         "n_layers": 4,
-        "d_model": 64,
-        "n_heads": 4,
+        "d_model": 32,
+        "n_heads": 2,
         "d_ffn": 64
     },
     "num_params": 116886,

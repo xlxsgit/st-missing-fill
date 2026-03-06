@@ -58,13 +58,15 @@ class STAT_Model(nn.Module):
         
         # Batch-wise Z-score normalization for high-variance physics features
         # Prevents Neural Network gradient explosion and bounds the arithmetic coefficient scales.
-        eps = 1e-8
+        eps = 1e-6
         cov_mean = covariates.mean(dim=(0, 1, 2), keepdim=True)
-        cov_std = covariates.std(dim=(0, 1, 2), keepdim=True) + eps
+        cov_std = covariates.std(dim=(0, 1, 2), keepdim=True)
+        cov_std = torch.clamp(cov_std, min=eps)
         cov_norm = (covariates - cov_mean) / cov_std
         
         topo_mean = topo_features.mean(dim=(0, 1, 2), keepdim=True)
-        topo_std = topo_features.std(dim=(0, 1, 2), keepdim=True) + eps
+        topo_std = topo_features.std(dim=(0, 1, 2), keepdim=True)
+        topo_std = torch.clamp(topo_std, min=eps)
         topo_norm = (topo_features - topo_mean) / topo_std
         
         # 1. Prepare Input for Hyper-network utilizing normalized values
@@ -110,35 +112,57 @@ class STAT_Model(nn.Module):
         term_temporal = torch.sum(A_coeff * Y_shifted, dim=-1) # [B, S, W]
         
         # B) Spatio-Temporal Lags:
-        # Computed sequentially to avoid O(B * W * S^2 * 2L) memory explosions for large batches
+        # Avoid OOM on MPS by processing Window steps W in blocks!
+        # This reduces Python loop overhead while keeping VRAM well below 24GB.
+        WINDOW_BLOCK_SIZE = 48 
+        
         spatial_lag_sum = torch.zeros(B, S, W, 2 * self.l_lags, device=self.device)
+        spatial_zero_sum = torch.zeros(B, S, W, device=self.device)
         
-        for idx, l in enumerate(self.l_values.long()):
-            # Calculate omega for this specific lag: [B, W, S_tgt, S_src]
-            l_tensor = torch.tensor([l.item()], dtype=torch.float32, device=self.device)
-            omega_l = self.priors.compute_omega(tau, l_tensor).squeeze(-1) 
+        # We move compute_omega inside the block loop to avoid allocating 
+        # a monolithic [B, W, S, S, 2L] tensor (~3GB for B=64).
+        for w_start in range(0, W, WINDOW_BLOCK_SIZE):
+            w_end = min(w_start + WINDOW_BLOCK_SIZE, int(W))
+            W_curr = w_end - w_start
             
-            # Y_src_l format to multiply with S_src:
-            # Y_src_l is [B, S_src, W] -> reorder to [B, W, 1, S_src] so it broadcasts over S_tgt
-            Y_src_l = Y_shifted[:, :, :, idx].transpose(1, 2).unsqueeze(2)
+            # tau_block: [B, W_curr, S_tgt, S_src]
+            tau_block = tau[:, w_start:w_end, :, :]
+            # omega_block: [B, W_curr, S, S, 2L]
+            omega_block = self.priors.compute_omega(tau_block, self.l_values)
             
-            # Compute the inner spatial sum over S_src (dim=3)
-            # Result: [B, W, S_tgt]
-            sum_l = torch.sum(omega_l * alpha_tilde * Y_src_l, dim=3)
+            # alpha_block: [B, W_curr, S_tgt, S_src, 1]
+            alpha_block = alpha_tilde[:, w_start:w_end, :, :].unsqueeze(-1)
             
-            # Transpose back to [B, S, W] and store in spatial_lag_sum
-            spatial_lag_sum[:, :, :, idx] = sum_l.transpose(1, 2)
-        
+            # Y_shift_block: [B, S_src, W_curr, 2L] -> [B, W_curr, S_src, 2L]
+            Y_shift_block = Y_shifted[:, :, w_start:w_end, :].transpose(1, 2)
+            # Reshape to broadcast: [B, W_curr, 1, S_src, 2L]
+            Y_shift_block_exp = Y_shift_block.unsqueeze(2)
+            
+            # Vectorized multiply and sum over S_src (dim 3)
+            # Result: [B, W_curr, S_tgt, 2L]
+            block_lag_sum = torch.sum(omega_block * alpha_block * Y_shift_block_exp, dim=3)
+            spatial_lag_sum[:, :, w_start:w_end, :] = block_lag_sum.transpose(1, 2)
+            
+            # Process l=0 Contemporaneous Interaction
+            # alpha_0_block: [B, W_curr, S_tgt, S_src]
+            alpha_0_block = alpha_tilde[:, w_start:w_end, :, :]
+            # omega_0_block: [B, W_curr, S, S]
+            omega_0_block = omega_0[:, w_start:w_end, :, :, 0]
+            
+            # Y_star_block: [B, S_src, W_curr] -> [B, W_curr, 1, S_src]
+            Y_star_block = Y_star[:, :, w_start:w_end].transpose(1, 2).unsqueeze(2)
+            
+            # Block zero sum: [B, W_curr, S_tgt]
+            block_zero_sum = torch.sum(omega_0_block * alpha_0_block * Y_star_block, dim=3)
+            spatial_zero_sum[:, :, w_start:w_end] = block_zero_sum.transpose(1, 2)
+            
+            # Force cleanup of the block's heavy intermediate omega
+            del omega_block, alpha_block, Y_shift_block, Y_shift_block_exp, tau_block
+
         # Multiply by beta_coeff and sum over lags 2L
         term_spatiotemporal = torch.sum(beta_coeff * spatial_lag_sum, dim=-1) # [B, S, W]
         
         # C) Contemporaneous Spatial Interaction (l=0)
-        # alpha_tilde: [B, W, S_tgt, S_src]
-        Y_src_0 = Y_star.transpose(1, 2).unsqueeze(2) # [B, W, 1, S_src]
-        
-        spatial_zero_sum = torch.sum(omega_0.squeeze(-1) * alpha_tilde * Y_src_0, dim=3) # [B, W, S_tgt]
-        spatial_zero_sum = spatial_zero_sum.transpose(1, 2) # [B, S_tgt, W]
-        
         term_zero_spatial = gamma_coeff.squeeze(-1) * spatial_zero_sum # [B, S, W]
         
         # D) Covariates baseline: Sum_p (B_coeff * X_p_norm)

@@ -4,9 +4,9 @@
     "pi": 0.3,
     "best_hparams": {
         "n_layers": 4,
-        "d_model": 32,
-        "n_heads": 4,
-        "d_ffn": 64
+        "d_model": 64,
+        "n_heads": 2,
+        "d_ffn": 128
     },
     "num_params": 67632,
     "epochs": 5,

@@ -24,6 +24,13 @@ class PhysicalAlignmentPriors(nn.Module):
         self.lambda_topo = nn.Parameter(torch.tensor(lambda_topo, dtype=torch.float32))
         self.sigma_tau = nn.Parameter(torch.tensor(sigma_tau, dtype=torch.float32))
         
+        # Caching for static matrices to prevent O(S^2 * W) repeated trig calculations
+        self.register_buffer("_D_exp", None)
+        self.register_buffer("_azimuth_exp", None)
+        self.register_buffer("_Z_penalty", None)
+        self.register_buffer("_ASPECT_tgt", None)
+        self.register_buffer("_eye", None)
+        
     def forward(self, topo_features, wind_speed, wind_direction):
         """
         topo_features: [batch_size, num_stations, window_size, topo_dim]
@@ -37,54 +44,56 @@ class PhysicalAlignmentPriors(nn.Module):
         """
         B, S, W = wind_speed.shape
         
-        # We assume topo_features are static over time, so we just take the first window step
-        # Let's say topo_features order: [X, Y, Z, ASPECT, SLOPE, TPI, ...]
-        # Here we extract X, Y, Z, ASPECT
-        # Shape: [B, S, topo_dim]
-        X = topo_features[:, :, 0, 0]
-        Y = topo_features[:, :, 0, 1]
-        Z = topo_features[:, :, 0, 2]
-        ASPECT = topo_features[:, :, 0, 3] # in degrees
-        
-        # Calculate Distance Matrix D: [B, S, S]
-        # D_s_s' means from source s' to target s
-        X_diff = X.unsqueeze(1) - X.unsqueeze(2) # [B, S (target), S (source)]
-        Y_diff = Y.unsqueeze(1) - Y.unsqueeze(2)
-        D = torch.sqrt(X_diff**2 + Y_diff**2 + 1e-8) # [B, S, S]
-        
-        # Calculate Azimuth Phi: from source s' to target s
-        # atan2(y, x) -> standard math coords. LV95 usually Y is North, X is East.
-        # Wind Dir: 0=North, 90=East. Map atan2 to Wind Dir coords:
-        # Phi = 90 - (180/pi) * atan2(Y_diff, X_diff)
-        azimuth = 90.0 - (180.0 / math.pi) * torch.atan2(Y_diff, X_diff)
-        azimuth = torch.fmod(azimuth + 360.0, 360.0) # [B, S, S]
-        
-        # Expand over window size
-        D_exp = D.unsqueeze(1).expand(B, W, S, S)             # [B, W, S_tgt, S_src]
-        azimuth_exp = azimuth.unsqueeze(1).expand(B, W, S, S)
-        Z_tgt = Z.unsqueeze(1).unsqueeze(3).expand(B, W, S, S) # [B, W, S_tgt, S_src]
-        Z_src = Z.unsqueeze(1).unsqueeze(2).expand(B, W, S, S)
-        ASPECT_tgt = ASPECT.unsqueeze(1).unsqueeze(3).expand(B, W, S, S)
+        # 1. Lazy Initialization of static Topographic matrices
+        if self._D_exp is None or self._D_exp.shape[0] != B or self._D_exp.shape[1] != W:
+            # Extract static features
+            X = topo_features[:, :, 0, 0]
+            Y = topo_features[:, :, 0, 1]
+            Z = topo_features[:, :, 0, 2]
+            ASPECT = topo_features[:, :, 0, 3] # in degrees
+            
+            # Distance Matrix D: [B, S, S]
+            X_diff = X.unsqueeze(1) - X.unsqueeze(2) # [B, S (target), S (source)]
+            Y_diff = Y.unsqueeze(1) - Y.unsqueeze(2)
+            D = torch.sqrt(X_diff**2 + Y_diff**2 + 1e-8) # [B, S, S]
+            
+            # Azimuth Phi
+            azimuth = 90.0 - (180.0 / math.pi) * torch.atan2(Y_diff, X_diff)
+            azimuth = torch.fmod(azimuth + 360.0, 360.0) # [B, S, S]
+            
+            # Z Penalty
+            Z_tgt = Z.unsqueeze(1).unsqueeze(3).expand(B, W, S, S)
+            Z_src = Z.unsqueeze(1).unsqueeze(2).expand(B, W, S, S)
+            
+            # Expand and cache
+            self._D_exp = D.unsqueeze(1).expand(B, W, S, S).clone()
+            self._azimuth_exp = azimuth.unsqueeze(1).expand(B, W, S, S).clone()
+            
+            # Since sigma_z is a parameter, Z_penalty should ideally recompute, but
+            # realistically topography penalty is statically dominated by Z. 
+            # We strictly cache the components and compute Z_penalty lazily without heavy trig.
+            self._Z_abs_diff = torch.abs(Z_tgt - Z_src).clone()
+            self._ASPECT_tgt = ASPECT.unsqueeze(1).unsqueeze(3).expand(B, W, S, S).clone()
+            
+            self._eye = torch.eye(S, device=self.device).view(1, 1, S, S).clone()
+            
+        # Reconstruct Parameter-dependent static penalty
+        Z_penalty = torch.exp(-self._Z_abs_diff / (self.sigma_z + 1e-6))
 
         # Wind angle differences (delta theta)
-        # Theta is source wind direction at time t
         wind_direction_trans = wind_direction.transpose(1, 2) # [B, W, S_src]
         Theta_src = wind_direction_trans.unsqueeze(2).expand(B, W, S, S) # [B, W, S_tgt, S_src]
         
-        diff = torch.abs(Theta_src - azimuth_exp)
+        diff = torch.abs(Theta_src - self._azimuth_exp)
         delta_theta = torch.minimum(diff, 360.0 - diff)
         
-        # Elevation Penalty
-        Z_penalty = torch.exp(-torch.abs(Z_tgt - Z_src) / (self.sigma_z + 1e-6))
-        
         # Aspect Gain
-        # Difference between source wind direction and target aspect
-        aspect_diff = torch.abs(Theta_src - ASPECT_tgt)
+        aspect_diff = torch.abs(Theta_src - self._ASPECT_tgt)
         mu = F.relu(torch.cos(aspect_diff * math.pi / 180.0))
         
         # Topographic friction alpha_tilde
         alpha_tilde = torch.cos(delta_theta * math.pi / 180.0) * \
-                      torch.exp(-D_exp / (self.sigma_d + 1e-6)) * \
+                      torch.exp(-self._D_exp / (self.sigma_d + 1e-6)) * \
                       Z_penalty * \
                       (1.0 + self.lambda_topo * mu)
                       
@@ -93,8 +102,7 @@ class PhysicalAlignmentPriors(nn.Module):
         alpha_tilde = alpha_tilde * mask_wind
         
         # Prevent self-loop in spatial propagation (diagonal = 0)
-        eye = torch.eye(S, device=self.device).view(1, 1, S, S)
-        alpha_tilde = alpha_tilde * (1 - eye)
+        alpha_tilde = alpha_tilde * (1 - self._eye)
 
         # Travel Time tau calculation
         # Effective wind speed: v_eff = wind_speed * cos(delta_theta)
@@ -103,10 +111,8 @@ class PhysicalAlignmentPriors(nn.Module):
         v_eff = wind_speed_src * torch.cos(delta_theta * math.pi / 180.0)
         v_eff = torch.clamp(v_eff, min=0.1) # Prevent division by zero
         
-        # D_exp is in meters, v_eff is in m/s. 
-        # t_seconds = D / v_eff. 
-        # Model steps are 10 minutes = 600 seconds.
-        tau = (D_exp / v_eff) / 600.0
+        # Travel Time tau calculation
+        tau = (self._D_exp / v_eff) / 600.0
         
         return alpha_tilde, tau
 
@@ -117,13 +123,16 @@ class PhysicalAlignmentPriors(nn.Module):
         l_values: Tensor of shape [num_l] containing the lag steps (e.g., [-3, -2, -1, 1, 2, 3])
         Returns Omega: [B, W, S_tgt, S_src, num_l]
         """
-        B, W, S, _ = tau.shape
-        num_l = len(l_values)
-        tau_exp = tau.unsqueeze(-1).expand(B, W, S, S, num_l)
-        l_exp = l_values.view(1, 1, 1, 1, num_l).expand(B, W, S, S, num_l).to(self.device)
+        # omega calculation via native broadcasting instead of massive explicit expansions
+        # tau is [B, W, S, S] -> [B, W, S, S, 1]
+        tau_usq = tau.unsqueeze(-1)
         
+        # l_values is [num_l] -> [1, 1, 1, 1, num_l]
+        l_usq = l_values.view(1, 1, 1, 1, -1).to(self.device)
+        
+        # PyTorch will broadcast the subtraction natively without allocating massive memory in-between
         # Omega = exp( - (l - tau)^2 / sigma_tau )
-        omega = torch.exp(-torch.pow(l_exp - tau_exp, 2) / (self.sigma_tau + 1e-6))
+        omega = torch.exp(-torch.pow(l_usq - tau_usq, 2) / (self.sigma_tau + 1e-6))
         return omega
 
 

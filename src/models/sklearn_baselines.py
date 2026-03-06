@@ -34,14 +34,15 @@ def run_sklearn_on_splits(
         y_test_obs: np.ndarray,
         algo: str,
         chunk_steps: int,
+        mode: str,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
         # each input shape: (S, T)
         s, t_train = y_train_obs.shape
         t_val = y_val_obs.shape[1]
         t_test = y_test_obs.shape[1]
-        out_train = np.empty((s, t_train), dtype=float)
-        out_val = np.empty((s, t_val), dtype=float)
-        out_test = np.empty((s, t_test), dtype=float)
+        out_train = np.empty((s, t_train), dtype=float) if mode in ("train", "all") else np.empty((s, 0))
+        out_val = np.empty((s, t_val), dtype=float) if mode in ("train", "all", "hpo") else np.empty((s, 0))
+        out_test = np.empty((s, t_test), dtype=float) if mode in ("test", "all") else np.empty((s, 0))
         train_seconds, infer_seconds = 0.0, 0.0
 
         num_chunks = max(t_train // chunk_steps + (1 if t_train % chunk_steps else 0), 1)
@@ -90,12 +91,14 @@ def run_sklearn_on_splits(
             else:
                 x_train_valid_hat = x_train_valid
 
-            x_train_hat = np.full_like(x_train, np.nan, dtype=float)
-            x_train_hat[:, valid_cols] = x_train_valid_hat
-            x_train_hat = np.nan_to_num(x_train_hat, nan=0.0)
-            out_train[:, st:ed_train] = x_train_hat.T
+            if mode in ("train", "all"):
+                # Always fit though, because memoryless models need train valid indices
+                x_train_hat = np.full_like(x_train, np.nan, dtype=float)
+                x_train_hat[:, valid_cols] = x_train_valid_hat
+                x_train_hat = np.nan_to_num(x_train_hat, nan=0.0)
+                out_train[:, st:ed_train] = x_train_hat.T
 
-            if x_val.shape[0] > 0:
+            if mode in ("train", "all", "hpo") and x_val.shape[0] > 0:
                 if x_train_valid.shape[1] > 0:
                     t0 = time.perf_counter()
                     x_val_valid_hat = imp.transform(x_val[:, valid_cols])
@@ -107,7 +110,7 @@ def run_sklearn_on_splits(
                 x_val_hat = np.nan_to_num(x_val_hat, nan=0.0)
                 out_val[:, st:ed_val] = x_val_hat.T
 
-            if x_test.shape[0] > 0:
+            if mode in ("test", "all") and x_test.shape[0] > 0:
                 if x_train_valid.shape[1] > 0:
                     t0 = time.perf_counter()
                     x_test_valid_hat = imp.transform(x_test[:, valid_cols])
@@ -147,10 +150,11 @@ def run_sklearn_on_splits(
         split_masked["test"][..., 0],
         model_name,
         chunk_steps=knn_chunk_steps if model_name == "knn" else mice_chunk_steps,
+        mode=mode,
     )
     return {
         "train": rmse_on_missing_2d(train_hat, split_y["train"], split_masks["train"]) if mode in ("train", "all") else np.nan,
-        "val": rmse_on_missing_2d(val_hat, split_y["val"], split_masks["val"]) if mode in ("train", "all") else np.nan,
+        "val": rmse_on_missing_2d(val_hat, split_y["val"], split_masks["val"]) if mode in ("train", "all", "hpo") else np.nan,
         "test": rmse_on_missing_2d(test_hat, split_y["test"], split_masks["test"]) if mode in ("test", "all") else np.nan,
     }, {
         "train_seconds": train_seconds,

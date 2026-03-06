@@ -15,11 +15,7 @@ def _safe_corrcoef(y_hat: np.ndarray) -> np.ndarray:
     return c
 
 
-def _build_spatial_feature(y_hat: np.ndarray, corr: np.ndarray, t: int) -> np.ndarray:
-    # Weighted neighborhood signal per station at timestamp t.
-    denom = np.sum(np.abs(corr), axis=1, keepdims=True)
-    denom[denom == 0] = 1.0
-    return (corr @ y_hat[:, t : t + 1] / denom).reshape(-1)
+    pass
 
 
 def _locf_prefill(y_obs: np.ndarray) -> np.ndarray:
@@ -44,44 +40,49 @@ def _vcaan_single(y_obs: np.ndarray, mask: np.ndarray, max_iter: int = 8, tol: f
 
     # 2) iterative temporal-spatial regression refinement.
     for _ in range(max_iter):
-        y_prev = y_hat.copy()
+        y_prev_iter = y_hat.copy()
         corr = _safe_corrcoef(y_hat)
 
-        x_train = []
-        y_train = []
-        x_test = []
-        test_idx = []
-
-        for t in range(1, timesteps - 1):
-            sp_prev = _build_spatial_feature(y_hat, corr, t - 1)
-            sp_curr = _build_spatial_feature(y_hat, corr, t)
-            sp_next = _build_spatial_feature(y_hat, corr, t + 1)
-            for s in range(stations):
-                feat = [
-                    y_hat[s, t - 1],
-                    y_hat[s, t + 1],
-                    sp_prev[s],
-                    sp_curr[s],
-                    sp_next[s],
-                ]
-                if mask[s, t] == 1:
-                    x_train.append(feat)
-                    y_train.append(y_hat[s, t])
-                else:
-                    x_test.append(feat)
-                    test_idx.append((s, t))
+        denom = np.sum(np.abs(corr), axis=1, keepdims=True)
+        denom[denom == 0] = 1.0
+        
+        # 全局计算空间特征: (S, S) @ (S, T) -> (S, T)
+        spatial_all = (corr @ y_hat) / denom
+        
+        # 提取各个偏移量的时间切片 (S, T-2)
+        y_prev_t = y_hat[:, :-2]
+        y_curr_t = y_hat[:, 1:-1]
+        y_next_t = y_hat[:, 2:]
+        
+        sp_prev_t = spatial_all[:, :-2]
+        sp_curr_t = spatial_all[:, 1:-1]
+        sp_next_t = spatial_all[:, 2:]
+        
+        mask_curr = mask[:, 1:-1]
+        
+        # 堆叠特征 (S, T-2, 5)
+        features = np.stack([y_prev_t, y_next_t, sp_prev_t, sp_curr_t, sp_next_t], axis=-1)
+        
+        train_mask_1d = (mask_curr == 1)
+        test_mask_1d = (mask_curr == 0)
+        
+        x_train = features[train_mask_1d]
+        y_train = y_curr_t[train_mask_1d]
+        x_test = features[test_mask_1d]
 
         if len(x_train) == 0 or len(x_test) == 0:
             break
 
         reg = LinearRegression()
-        reg.fit(np.asarray(x_train, dtype=float), np.asarray(y_train, dtype=float))
-        preds = reg.predict(np.asarray(x_test, dtype=float))
+        reg.fit(x_train, y_train)
+        preds = reg.predict(x_test)
 
-        for (s, t), pred in zip(test_idx, preds):
-            y_hat[s, t] = float(pred)
+        # 更新原始矩阵中的缺失值预测
+        y_curr_update = y_curr_t.copy()
+        y_curr_update[test_mask_1d] = preds
+        y_hat[:, 1:-1] = y_curr_update
 
-        diff = np.nanmean(np.abs(y_hat[mask == 0] - y_prev[mask == 0]))
+        diff = np.nanmean(np.abs(y_hat[mask == 0] - y_prev_iter[mask == 0]))
         if np.isnan(diff) or diff < tol:
             break
 
@@ -92,12 +93,18 @@ def run_vcaan_on_splits(
     split_y: dict,
     split_masked: dict,
     split_masks: dict,
+    mode: str = "all",
 ) -> tuple[dict[str, float], dict[str, float]]:
     # This is a practical VCAAN baseline adaptation:
     # temporal-spatial iterative regression initialized by LOCF prefill.
     res = {}
     split_runtime = {}
     for split_name in ["train", "val", "test"]:
+        if mode == "test" and split_name != "test":
+            res[split_name] = np.nan
+            split_runtime[split_name] = 0.0
+            continue
+            
         t0 = time.perf_counter()
         y_obs = split_masked[split_name][..., 0]
         mask = split_masks[split_name]

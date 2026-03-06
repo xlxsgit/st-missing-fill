@@ -128,32 +128,33 @@ def run_pypots_deep_on_splits(
 
     model = _build_pypots_model(model_name, **build_kwargs)
     
-    if mode in ("train", "all"):
+    if mode in ("train", "all", "hpo"):
         t0 = time.perf_counter()
         model.fit({"X": d["y_train_masked_win"]}, val_set={"X": d["y_val_masked_win"], "X_ori": d["y_val_win"]})
         train_seconds = time.perf_counter() - t0
         
-        # Save PyPOTS model
-        model.save(str(model_path), overwrite=True)
-        
-        # Extract parameter count if possible
-        num_params = 0
-        if hasattr(model, "model"):
-            num_params = sum(p.numel() for p in model.model.parameters() if p.requires_grad)
+        if mode != "hpo":
+            # Save PyPOTS model
+            model.save(str(model_path), overwrite=True)
             
-        clean_hparams = {k: v for k, v in build_kwargs.items() if k != "device"}
-        hparams_to_save = {
-            "model_name": model_name,
-            "pattern": pattern,
-            "pi": pi,
-            "best_hparams": hparams_override or clean_hparams,
-            "num_params": num_params,
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "window_size": window_size,
-        }
-        with open(hparams_path, "w") as f:
-            json.dump(hparams_to_save, f, indent=4)
+            # Extract parameter count if possible
+            num_params = 0
+            if hasattr(model, "model"):
+                num_params = sum(p.numel() for p in model.model.parameters() if p.requires_grad)
+                
+            clean_hparams = {k: v for k, v in build_kwargs.items() if k != "device"}
+            hparams_to_save = {
+                "model_name": model_name,
+                "pattern": pattern,
+                "pi": pi,
+                "best_hparams": hparams_override or clean_hparams,
+                "num_params": num_params,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "window_size": window_size,
+            }
+            with open(hparams_path, "w") as f:
+                json.dump(hparams_to_save, f, indent=4)
     else:
         train_seconds = 0.0
         if not model_path.exists():
@@ -161,6 +162,12 @@ def run_pypots_deep_on_splits(
         model.load(str(model_path))
 
     def _predict_with_device_fallback(x: np.ndarray, chunk_size: int = 1500) -> np.ndarray:
+        # Optimization: Apply device directly if known to avoid constant RuntimeError failovers
+        current_dev = build_kwargs.get("device", torch.device("cpu"))
+        if hasattr(model, "model") and hasattr(model, "device") and current_dev != model.device:
+            model.model = model.model.to(current_dev)
+            model.device = current_dev
+            
         results = []
         for i in range(0, len(x), chunk_size):
             x_chunk = x[i : i + chunk_size]
@@ -184,7 +191,7 @@ def run_pypots_deep_on_splits(
 
     t1 = time.perf_counter()
     train_pred = _predict_with_device_fallback(d["y_train_masked_win"]) if mode in ("train", "all") else np.zeros_like(d["y_train_masked_win"])
-    val_pred = _predict_with_device_fallback(d["y_val_masked_win"]) if mode in ("train", "all") else np.zeros_like(d["y_val_masked_win"])
+    val_pred = _predict_with_device_fallback(d["y_val_masked_win"]) if mode in ("train", "all", "hpo") else np.zeros_like(d["y_val_masked_win"])
     test_pred = _predict_with_device_fallback(d["y_test_masked_win"]) if mode in ("test", "all") else np.zeros_like(d["y_test_masked_win"])
     infer_seconds = time.perf_counter() - t1
     
@@ -197,7 +204,7 @@ def run_pypots_deep_on_splits(
 
     return {
         "train": rmse_on_missing_3d(train_pred, d["y_train_win"], d["train_mask_win"]) if mode in ("train", "all") else np.nan,
-        "val": rmse_on_missing_3d(val_pred, d["y_val_win"], d["val_mask_win"]) if mode in ("train", "all") else np.nan,
+        "val": rmse_on_missing_3d(val_pred, d["y_val_win"], d["val_mask_win"]) if mode in ("train", "all", "hpo") else np.nan,
         "test": rmse_on_missing_3d(test_pred, d["y_test_win"], d["test_mask_win"]) if mode in ("test", "all") else np.nan,
     }, {
         "train_seconds": float(train_seconds),

@@ -32,12 +32,15 @@ class STAT_Loss(nn.Module):
         self.mse = nn.MSELoss()
         
     def forward(self, Y_hat, Y_clean, Y_true, mask):
-        observed_idx = mask == 1.0
-        if observed_idx.sum() == 0:
+        mask_sum = mask.sum()
+        if mask_sum == 0:
             return torch.tensor(0.0, device=Y_hat.device, requires_grad=True)
             
-        loss_final = self.mse(Y_hat[observed_idx], Y_true[observed_idx])
-        loss_clean = self.mse(Y_clean[observed_idx], Y_true[observed_idx])
+        diff_final = (Y_hat - Y_true) * mask
+        loss_final = (diff_final ** 2).sum() / (mask_sum + 1e-8)
+        
+        diff_clean = (Y_clean - Y_true) * mask
+        loss_clean = (diff_clean ** 2).sum() / (mask_sum + 1e-8)
         
         rmse_final = torch.sqrt(loss_final + 1e-8)
         rmse_clean = torch.sqrt(loss_clean + 1e-8)
@@ -92,12 +95,13 @@ def build_spatial_dataloader(split_y: np.ndarray, split_masked: np.ndarray, spli
     # Retain all covariates (we can let the model use wind_dir again as covariate or pop it)
     covariates_win = X_win # [B, S, W, C]
     
-    # Convert all to Tensors
-    t_Y_raw = torch.tensor(Y_raw_win)
-    t_mask = torch.tensor(mask_win)
-    t_cov = torch.tensor(covariates_win)
-    t_wdir = torch.tensor(wind_dir_win)
-    t_Y_true = torch.tensor(Y_true_win)
+    # Convert all to CPU Tensors to avoid OOM crash before training starts!
+    # They will be dispatched to MPS/CUDA batch by batch during iteration.
+    t_Y_raw = torch.tensor(Y_raw_win, dtype=torch.float32)
+    t_mask = torch.tensor(mask_win, dtype=torch.float32)
+    t_cov = torch.tensor(covariates_win, dtype=torch.float32)
+    t_wdir = torch.tensor(wind_dir_win, dtype=torch.float32)
+    t_Y_true = torch.tensor(Y_true_win, dtype=torch.float32)
     
     dataset = TensorDataset(t_Y_raw, t_mask, t_cov, t_wdir, t_Y_true)
     return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
@@ -113,16 +117,23 @@ def evaluate_mymodel(model, data_loader, device):
             
             # The station IDs and Topo are handled as static attributes or passed in
             # topo_batch: [B, S, W, 4]
-            topo_batch = model.static_topo_features.unsqueeze(0).unsqueeze(2).expand(Y_raw.size(0), -1, Y_raw.size(2), -1)
-            station_ids = torch.arange(Y_raw.size(1), device=device)
+            # Since topography is static, we can expand from [S, 4] -> [B, S, W, 4]
+            # model.priors._Z_abs_diff and others are already cached with B, W shapes.
+            B, S, W = Y_raw.shape
+            topo_batch = model.priors._ASPECT_tgt.new_zeros(B, S, W, 4) # Placeholder for hypernet
+            station_ids = torch.arange(S, device=device)
             
             Y_hat, _ = model(Y_raw, mask, cov, topo_batch, wdir, station_ids)
             
-            observed_idx = mask == 1.0 # Evaluate only on observed
-            if observed_idx.sum() > 0:
-                mse = nn.functional.mse_loss(Y_hat[observed_idx], Y_true[observed_idx], reduction='sum')
-                mse_sum += mse.item()
-                count += observed_idx.sum().item()
+            mask_sum = mask.sum().item()
+            if mask_sum > 0:
+                diff = (Y_hat - Y_true) * mask
+                mse = (diff ** 2).sum().item()
+                mse_sum += mse
+                count += mask_sum
+                
+            # del variables to allow reuse, but avoid empty_cache sync here
+            del Y_raw, mask, cov, wdir, Y_true, Y_hat, topo_batch
                 
     if count == 0:
         return float('inf')
@@ -162,7 +173,14 @@ def run_mymodel_on_splits(
     # ground_X_splits already contains time-sliced X for each split
     # ground_X_splits[split_name] is [S, C, T]. We need it to be [Num_Windows, S, W, C]
     X_win_splits = {}
-    for split_name in ['train', 'val', 'test']:
+    if mode in ("train", "all"):
+        splits_to_process = ['train', 'val', 'test']
+    elif mode == "hpo":
+        splits_to_process = ['train', 'val']
+    else:
+        splits_to_process = ['test']
+        
+    for split_name in splits_to_process:
         X_split = ground_X_splits[split_name] # [S, C, T]
         S, C, T = X_split.shape
         usable_steps = (T // window_size) * window_size
@@ -183,7 +201,7 @@ def run_mymodel_on_splits(
     effective_batch_size = min(batch_size, 8)
     
     loaders = {}
-    for split_name in ['train', 'val', 'test']:
+    for split_name in splits_to_process:
         loaders[split_name] = build_spatial_dataloader(
             split_y=split_y[split_name],
             split_masked=split_masked[split_name],
@@ -232,9 +250,14 @@ def run_mymodel_on_splits(
         device=device
     ).to(device)
     
-    # Attach static topo for convenience in eval
-    model.static_topo_features = topo_features 
-    
+    # We must trigger the first forward pass of the static priors here
+    # to cache the topography tensors so they are not recalculated inside dataloader loops.
+    with torch.no_grad():
+        dummy_wind = torch.zeros(1, num_stations, window_size, device=device)
+        dummy_topo = topo_features.unsqueeze(0).unsqueeze(2).expand(1, -1, window_size, -1)
+        # This will cache _D_exp, _azimuth_exp, Z_penalty, etc. natively handling hardware syncs.
+        model.priors(dummy_topo, dummy_wind, dummy_wind)
+        
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     criterion = STAT_Loss(lambda_clean=0.5)
     
@@ -243,7 +266,7 @@ def run_mymodel_on_splits(
     best_val_rmse = float('inf')
     early_stop_counter = 0
     
-    if mode in ("train", "all"):
+    if mode in ("train", "all", "hpo"):
         for epoch in range(epochs):
             model.train()
             train_loss = 0.0
@@ -252,7 +275,9 @@ def run_mymodel_on_splits(
                 
                 # Prepare static inputs
                 B, S, W = Y_raw.shape
-                topo_batch = topo_features.unsqueeze(0).unsqueeze(2).expand(B, -1, W, -1)
+                # Passing a dummy with correct S dimension to satisfy HyperNetwork input projection
+                # Physics priors will use their own cached matrices instead.
+                topo_batch = torch.zeros(B, S, W, 4, device=device)
                 station_ids = torch.arange(S, device=device)
                 
                 optimizer.zero_grad()
@@ -263,6 +288,10 @@ def run_mymodel_on_splits(
                 optimizer.step()
                 train_loss += loss.item()
                 
+                # Ruthlessly prune PyTorch retained graph buffers per-batch
+                # BUT don't call empty_cache inside the loop as it is too slow
+                del Y_hat, Y_clean, loss, Y_raw, mask, cov, wdir, Y_true, topo_batch
+                
             # Validation
             val_rmse = evaluate_mymodel(model, loaders['val'], device)
             if verbose:
@@ -272,32 +301,38 @@ def run_mymodel_on_splits(
                 best_val_rmse = val_rmse
                 early_stop_counter = 0
                 # Save best state dict
-                torch.save(model.state_dict(), str(model_path))
+                if mode != "hpo":
+                    torch.save(model.state_dict(), str(model_path))
             else:
                 early_stop_counter += 1
                 if early_stop_counter >= patience:
                     if verbose:
                         print(f"Early stopping triggered at epoch {epoch+1}")
                     break
+                    
+            # Explicitly force MPS to drop the VRAM cache at epoch boundaries
+            if hasattr(torch.mps, 'empty_cache'):
+                torch.mps.empty_cache()
         
         # Finally, save hparams config
-        num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        hparams_to_save = {
-            "model_name": "mymodel",
-            "pattern": pattern,
-            "pi": pi,
-            "best_hparams": hparams_override or {"d_model": d_model, "l_lags": l_lags, "num_layers": num_layers, "nhead": nhead},
-            "num_params": num_params,
-            "epochs": epochs,
-            "batch_size": batch_size,
-            "window_size": window_size,
-        }
-        with open(str(hparams_path), "w") as f:
-            json.dump(hparams_to_save, f, indent=4)
-            
-        # Ensure we evaluate the best model state instead of the last epoch
-        if model_path.exists():
-            model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True))
+        if mode != "hpo":
+            num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            hparams_to_save = {
+                "model_name": "mymodel",
+                "pattern": pattern,
+                "pi": pi,
+                "best_hparams": hparams_override or {"d_model": d_model, "l_lags": l_lags, "num_layers": num_layers, "nhead": nhead},
+                "num_params": num_params,
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "window_size": window_size,
+            }
+            with open(str(hparams_path), "w") as f:
+                json.dump(hparams_to_save, f, indent=4)
+                
+            # Ensure we evaluate the best model state instead of the last epoch
+            if model_path.exists():
+                model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=True))
 
     else: # mode == "test"
         if not model_path.exists():
@@ -322,20 +357,31 @@ def run_mymodel_on_splits(
             for batch in loader:
                 Y_raw, mask, cov, wdir, _ = [b.to(device) for b in batch]
                 B, S, W = Y_raw.shape
-                topo_batch = topo_features.unsqueeze(0).unsqueeze(2).expand(B, -1, W, -1)
+                # topo_batch: satisfy hypernet input projection
+                topo_batch = torch.zeros(B, S, W, 4, device=device)
                 station_ids = torch.arange(S, device=device)
                 
                 Y_hat, _ = model(Y_raw, mask, cov, topo_batch, wdir, station_ids)
                 all_preds.append(Y_hat.cpu().numpy())
                 
+                # Prevent inference OOM
+                del Y_hat, Y_raw, mask, cov, wdir, topo_batch
+                
         preds_concat = np.concatenate(all_preds, axis=0) # [B, S, W]
         # Reshape to [S, B*W] to match original flattened shape and mask format
         S_dim = preds_concat.shape[1]
         preds_2d = preds_concat.transpose(1, 0, 2).reshape(S_dim, -1)
+        
+        del all_preds, preds_concat
+        import gc
+        gc.collect()
+        if hasattr(torch.mps, 'empty_cache'):
+            torch.mps.empty_cache()
+            
         return preds_2d
         
     train_pred_2d = predict_split(loaders['train']) if mode in ("train", "all") else np.empty((split_y['train'].shape[0], 0))
-    val_pred_2d = predict_split(loaders['val']) if mode in ("train", "all") else np.empty((split_y['val'].shape[0], 0))
+    val_pred_2d = predict_split(loaders['val']) if mode in ("train", "all", "hpo") else np.empty((split_y['val'].shape[0], 0))
     test_pred_2d = predict_split(loaders['test']) if mode in ("test", "all") else np.empty((split_y['test'].shape[0], 0))
     
     infer_seconds = time.perf_counter() - t1
@@ -360,7 +406,7 @@ def run_mymodel_on_splits(
                                     truncate_to_match(split_masks['train'], train_pred_2d)) if mode in ("train", "all") else np.nan,
         "val": rmse_on_missing_2d(val_pred_2d, 
                                   truncate_to_match(split_y['val'], val_pred_2d), 
-                                  truncate_to_match(split_masks['val'], val_pred_2d)) if mode in ("train", "all") else np.nan,
+                                  truncate_to_match(split_masks['val'], val_pred_2d)) if mode in ("train", "all", "hpo") else np.nan,
         "test": rmse_on_missing_2d(test_pred_2d, 
                                    truncate_to_match(split_y['test'], test_pred_2d), 
                                    truncate_to_match(split_masks['test'], test_pred_2d)) if mode in ("test", "all") else np.nan,
