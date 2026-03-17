@@ -1,1 +1,134 @@
-> **本文档说明**：\n> 本文档用于统一沉淀和记录模型分析、需求理解、代码探索以及撰写文档时的关键动机与决策依据。后续在新的对话窗口中，都可以通过阅读此文档快速恢复上下文，了解每一步操作和架构设计的原因。\n\n# 需求分析与代码探索记录\n\n## 1. 额外测试不覆盖原始图且只推理额外时间范围\n- **目标文件**: `src/experiments/runner.py`\n- **发现**: 目前在 `mode == \"test\"` 时，会在 378 行的循环中强行分别处理 `train`、`val` 和 `test`（其中 test 会被重命名为 `extra_test`）。这意味着即使使用的是仅仅推理旧模型，它仍然也会重新遍历 `train` 和 `val` 切片并保存记录，进而使得它们之前的原图被重新覆盖（或者触发重新画图生成相同图像）。\n- **修改方案**: 在 `src/experiments/runner.py` 的 378 行遍历不同 splits 记录到 `rows` 时，如果 `args.mode == \"test\"`，则通过 `if split_name != \"test\": continue` 直接跳过 `train` 和 `val` 分支，从而保证 `df_long` 只包含 `extra_test`，避免触发旧图重新绘制。并且这样也节省了对 `train` 和 `val` 再次进行无意义推理的时间。\n\n## 2. 图像样式修改\n- **目标文件**: `src/visualization/baseline_compare.py`\n- **当前状态**: \n    - 图片名称前缀有 `baseline_grouped_bar_`。\n    - 图有总体 `suptitle` 以及子图 `set_title`。\n    - 图例标题带有带有括号内容：`title=\"Models (Sorted by RMSE)\"`。\n    - 图片具有 `figsize=(14, 16)` 的尺寸，让三大行子图拼起来显得柱状很高。\n- **修改方案**:\n    - 文件名修改为直接使用 `{split}.png` (例: `extra_test.png`)。\n    - 移除 `.suptitle()` 和 `.set_title()` 的调用，从而移除所有标题。\n    - 把 `.legend()` 中的 `title` 参数改为单纯的 `\"Models\"`。\n    - 降低图的高度，将 `figsize=(14, 16)` 变更为 `figsize=(14, 8)`。\n\n## 3. 运行配置的修改\n- **目标文件**: `run_experiments.sh`\n- **修改方案**: 在脚本中将 `RUN_NAME=\"xlx\"` 修改为 `RUN_NAME=\"tmp\"`。将作为独立运行空间避免污染原用户的环境。\n\n### 论文第四章架构确定动机分析\n\n1. **模型核心理解**: \n    - 核心是在做风速插补，核心是将基于距离、海拔、坡向等物理常识的对齐公式（STAR）与能动态生成系数的时空 Transformer 超网络结合，且具有**非迭代**（One-Shot）的优良特性。\n2. **4.2 节命名**: \n    - 通过分析 `components.py` 里的 `PhysicalAlignmentPriors` 类，发现该部分计算地形摩擦系数 $\\tilde{\\alpha}$ 并引入了风源引导（切断逆风面），因此起名为《风向引导的物理空间对齐与时空自回归建模》最切合主题。\n3. **4.3 节命名**: \n    - 分析 `STAT_HyperNetwork` 发现它包含时间、空间注意力双层结构，最后有解耦的多个分类头来得到公式需要的各个矩阵（AR、空间、协变量系数等），这实际上是HyperNetwork的思想，所以命名为《基于时空Transformer的超网络动态系数生成》。\n4. **4.4 实验分析信息提取**:\n    - 通过 `run_experiments.sh` 抓取到了设定的3种缺失情况(MCAR, SEQ, SCM)和3种缺失率，以及使用的多个基线模型（如 vcaan, itransformer 等）。\n    - 通过 `runner.py` 确认到了主要评价指标 `RMSE` 和 `MAE` （调用了 `rmse_on_missing_2d`等函数），并通过生成拓扑特征矩阵确认包含了 X, Y, Z, ASPECT 等地形协变量。\n
+# Transformer Architecture Exploration
+
+## Objective
+Analyze the input, layers, output, and dimensions of the Transformer model in `mymodel`.
+
+## Findings
+
+### 1. Transformer Input Preparation
+The input to the `STAT_HyperNetwork` is constructed by concatenating several features:
+- `Y_safe`: `[B, S, W, 1]` (Raw wind speed with NaNs replaced by 0)
+- `mask`: `[B, S, W, 1]` (Observation mask, 1 for observed, 0 for missing)
+- `wind_dir`: `[B, S, W, 1]` (Wind direction)
+- `covariates (norm)`: `[B, S, W, P]` (Normalized meteorological features like Temperature, Pressure, etc.)
+- `topo_features (norm)`: `[B, S, W, topo_dim]` (Normalized topographic features like X, Y, Z, Aspect)
+
+**Total Input Dimension (`in_features`)**: $1 + 1 + 1 + P + \text{topo\_dim}$
+**Input Shape**: `[B, S, W, in_features]`
+
+### 2. Hyper-Network Internal Layers
+The `STAT_HyperNetwork` processes the input through three main stages:
+
+#### A. Embedding and Projection
+- **Input Projection**: A linear layer projects `in_features` to `d_model`.
+  - Shape: `[B*S, W, in_features] -> [B*S, W, d_model]`
+- **Temporal Positional Encoding**: Added to the sequence dimension `W`.
+  - Shape: `[W, d_model]`
+- **Spatial Station Embedding**: A learnable embedding for each station is added.
+  - Shape: `[S, d_model]` expanded to `[B*S, W, d_model]`
+
+#### B. Duel Transformer Encoders (Spatio-Temporal Attention)
+1. **Temporal Transformer**:
+   - `num_layers` of Transformer blocks.
+   - Operates on the time dimension `W` for each station independently.
+   - Input: `[B*S, W, d_model]`
+   - Output: `[B*S, W, d_model]`
+2. **Spatial Transformer**:
+   - First, reshapes and transposes to group stations for each time step.
+   - Shape: `[B*S, W, d_model] -> [B, S, W, d_model] -> [B, W, S, d_model] -> [B*W, S, d_model]`
+   - `num_layers` of Transformer blocks.
+   - Operates on the station dimension `S` for each time step independently.
+   - Input: `[B*W, S, d_model]`
+   - Output: `[B*W, S, d_model]`
+
+#### C. Output Projection Heads
+Reshapes back to `[B, S, W, d_model]` and splits into several linear heads:
+1. **Filler Head**: `Linear -> Y_clean`
+   - Shape: `[B, S, W, d_model] -> [B, S, W]`
+2. **Temporal AR Head**: `Linear + Tanh -> A_coeff`
+   - Shape: `[B, S, W, d_model] -> [B, S, W, 2L]` (where $2L$ is the number of lags, e.g., $2 \times 3 = 6$)
+3. **Spatial & Covariate Head**: `Linear + Tanh -> concat(beta, B_cov, gamma)`
+   - Shape: `[B, S, W, d_model] -> [B, S, W, 2L + P + 1]`
+   - **beta**: `[B, S, W, 2L]`
+   - **B_cov**: `[B, S, W, P]`
+   - **gamma**: `[B, S, W, 1]`
+
+### 3. Summary of Dimensions
+- `B`: Batch size
+- `S`: Number of stations
+- `W`: Sequence length (Window)
+- `P`: Number of covariates
+- `topo_dim`: Topographic feature dimension
+- `d_model`: Transformer hidden dimension
+- `2L`: Double the number of temporal lags
+- `in_features`: $3 + P + \text{topo\_dim}$
+
+### 4. Network Structure Diagram (ASCII)
+
+```text
+    [Input Features]
+    (Y_raw, Mask, Wind_dir, Covariates, Topo)
+    Shape: [B, S, W, in_features]
+           |
+           v
+    [Linear Projection] -> [B, S, W, d_model]
+           |
+           v
+    [Add Positional Encoding (Time)] 
+    [Add Station Embedding (Space)]
+           |
+           v
++----------+----------+
+|  Temporal Encoder   |  <-- Reshape to [B*S, W, d_model]
+| (Self-Attention @W) |      (Processes each station's timeline)
++----------+----------+
+           |
+           v
++----------+----------+
+|   Spatial Encoder   |  <-- Reshape to [B*W, S, d_model]
+| (Self-Attention @S) |      (Processes each time step's space)
++----------+----------+
+           |
+           v
+    [Final Representation]
+    Shape: [B, S, W, d_model]
+           |
+           +-----------------------+-----------------------+
+           |                       |                       |
+    [Filler Head]           [AR Head]            [Spatial/Cov Head]
+    (Linear)                (Linear + Tanh)      (Linear + Tanh)
+           |                       |                       |
+    [Y_clean]               [A_coeff]            [beta, B_cov, gamma]
+    [B, S, W]               [B, S, W, 2L]        [B, S, W, 2L+P+1]
+```
+
+## 3. 最终命名方案 (中英双语版)
+
+为了确保学术严谨性，避开歧义，并突出“自回归”这一统计学核心，最终建议如下：
+
+### 3.1 总体架构命名
+
+**主模型名称**: **Spatio-Temporal Attention-based Autoregressive Network**
+**中文名称**: **基于时空注意力的自回归插补网络**
+**核心缩写**: **STA-AR**
+
+---
+
+### 3.2 章节详细命名
+
+| 章节 | 英文全称 (Full English Name) | 中文全称 (Full Chinese Name) | 缩写 (Abbr.) |
+| :--- | :--- | :--- | :--- |
+| **主标题** | **Spatio-Temporal Attention-based Autoregressive Network** | **基于时空注意力的自回归插补网络** | **STA-AR** |
+| **4.3 节** | **Spatio-Temporal Aligned Autoregression** | **时空对齐自回归** | **STAR** |
+| **4.4 节** | **Spatio-Temporal Attention HyperNetwork** | **时空注意力超网络** | **ST-AHN** |
+
+---
+
+### 3.3 命名动机 (Rationale)
+
+1.  **自回归为本 (AR-Centric)**: 将 **Autoregressive** 置于大标题的中心位置，符合统计学硕士论文对模型本质的界定。
+2.  **避开歧义 (No Ambiguity)**: 弃用了 STAT 等带有双关可能的词汇，改用 **STA** (Spatio-Temporal Attention)，更加中立且准确地描述了技术途径。
+3.  **对齐与注意力 (Alignment & Attention)**: 
+    - **4.3 节的 STAR**: 强调了物理上的“对齐（Aligned）”，这是该章基于风轴物理推导的核心。
+    - **4.4 节的 ST-AHN**: 强调了神经网络部分的“注意力（Attention）”和“超网络（HyperNetwork）”属性，避开了对 Transformer 完整性的争议。
+4.  **学术协调**: 整体叫 **STA-AR**，内部逻辑模块叫 **STAR** 和 **ST-AHN**，在缩写上具有逻辑相关性，便于读者记忆。

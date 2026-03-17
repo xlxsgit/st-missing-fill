@@ -44,7 +44,21 @@ def plot_baseline_comparison(
     patterns_order = ["MCAR", "SEQ", "SCM"]
     
     models = sorted(df["model"].unique().tolist())
-    palette = dict(zip(models, sns.color_palette("Set2", n_colors=max(len(models), 1))))
+    
+    # Model name mapping
+    name_map = {}
+    for m in models:
+        m_lower = m.lower()
+        if m_lower == "mymodel":
+            name_map[m] = "STAT-Net"
+        elif m_lower == "itransformer":
+            name_map[m] = "iTransformer"
+        else:
+            name_map[m] = m.upper()
+    
+    df["model_display"] = df["model"].map(name_map)
+    display_models = sorted(df["model_display"].unique().tolist())
+    palette = dict(zip(display_models, sns.color_palette("Set2", n_colors=max(len(display_models), 1))))
 
     out = {}
 
@@ -68,16 +82,17 @@ def plot_baseline_comparison(
                 pi_df = pat_df[pat_df["pi"] == pi_val].sort_values(by=split, ascending=True)
                 
                 for j, (_, row) in enumerate(pi_df.iterrows()):
-                    model_name = row["model"]
+                    orig_model = row["model"]
+                    model_display = name_map[orig_model]
                     rmse_val = row[split]
                     offset = (j - len(pi_df) / 2 + 0.5) * bar_width
                     ax.bar(
                         i + offset, 
                         rmse_val, 
                         width=bar_width, 
-                        color=palette[model_name], 
+                        color=palette[model_display], 
                         edgecolor="white",
-                        label=model_name if i == 0 else "" # Only add to legend once per model position inside a group
+                        label=model_display if i == 0 else "" # Only add to legend once per model position inside a group
                     )
                     
                     if annotate:
