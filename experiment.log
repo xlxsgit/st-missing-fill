@@ -1,139 +1,0 @@
-==========================================================
-⚡️ 准备启动实验，将生成的日志名称为: xlx
-🕹️ 当前运行模式: all
-📦 模型列表: mymodel,vcaan,locf,knn,mice,saits,itransformer,grud
-📅 训练数据: [2023-01-01] - [2023-01-30]
-📅 验证/默认测试 : [2023-02-01] - [2023-03-10]
-🧩 缺失模式: mcar,seq,scm | 比例: 0.1,0.3,0.5
-🔄 Epochs: 5 | Patience: 1 | HPO 寻参: 5次
-==========================================================
-[34m
-████████╗██╗███╗   ███╗███████╗    ███████╗███████╗██████╗ ██╗███████╗███████╗    █████╗ ██╗
-╚══██╔══╝██║████╗ ████║██╔════╝    ██╔════╝██╔════╝██╔══██╗██║██╔════╝██╔════╝   ██╔══██╗██║
-   ██║   ██║██╔████╔██║█████╗█████╗███████╗█████╗  ██████╔╝██║█████╗  ███████╗   ███████║██║
-   ██║   ██║██║╚██╔╝██║██╔══╝╚════╝╚════██║██╔══╝  ██╔══██╗██║██╔══╝  ╚════██║   ██╔══██║██║
-   ██║   ██║██║ ╚═╝ ██║███████╗    ███████║███████╗██║  ██║██║███████╗███████║██╗██║  ██║██║
-   ╚═╝   ╚═╝╚═╝     ╚═╝╚══════╝    ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝╚═╝
-ai4ts v0.0.3 - building AI for unified time-series analysis, https://time-series.ai [0m
-
-Run dir: /Users/lxx/Documents/codes/st-missing-fill/logs/xlx
-Args:
-{
-  "models": "mymodel,vcaan,locf,knn,mice,saits,itransformer,grud",
-  "patterns": "mcar,seq,scm",
-  "pis": "0.1,0.3,0.5",
-  "seed": null,
-  "window_size": 144,
-  "epochs": 5,
-  "batch_size": 64,
-  "max_windows": null,
-  "patience": 1,
-  "run_name": "xlx",
-  "mode": "all",
-  "quiet_train": true,
-  "knn_chunk_steps": 1008,
-  "mice_chunk_steps": 720,
-  "knn_neighbors": 5,
-  "mice_max_iter": 8,
-  "mice_tol": 0.001,
-  "mice_show_warnings": false,
-  "seq_n1": 24,
-  "seq_p1": 0.5,
-  "seq_l_obse_base": 10,
-  "seq_p0": 0.5,
-  "scm_pi_hat": 0.95,
-  "hpo_trials": 5,
-  "train_start": "2023-01-01",
-  "train_end": "2023-01-30",
-  "val_start": "2023-02-01",
-  "val_end": "2023-02-10",
-  "test_start": "2023-03-01",
-  "test_end": "2023-03-10",
-  "extra_test_start": "2023-04-01",
-  "extra_test_end": "2023-04-10"
-}
-Using device: mps
-Loaded ground_X=(112, 7, 105264), ground_y=(112, 105264), splits train=(112, 4320), val=(112, 1440), test=(112, 1440)
-Stations=112, target=wind_speed
-Model          | Pattern   | PI    | Test RMSE  | Time(s)  | Status
------------------------------------------------------------------
-mymodel        | mcar      | 0.10  | -          | -        | ⏳mymodel        | mcar      | 0.10  | 3.3954     | 112.28   | ✅
-vcaan          | mcar      | 0.10  | -          | -        | ⏳vcaan          | mcar      | 0.10  | 3.7256     | 0.46     | ✅
-locf           | mcar      | 0.10  | -          | -        | ⏳locf           | mcar      | 0.10  | 3.7782     | 0.01     | ✅
-knn            | mcar      | 0.10  | -          | -        | ⏳knn            | mcar      | 0.10  | 3.7362     | 4.95     | ✅
-mice           | mcar      | 0.10  | -          | -        | ⏳mice           | mcar      | 0.10  | 3.7178     | 4.01     | ✅
-saits          | mcar      | 0.10  | -          | -        | ⏳saits          | mcar      | 0.10  | 3.6166     | 86.74    | ✅
-itransformer   | mcar      | 0.10  | -          | -        | ⏳itransformer   | mcar      | 0.10  | 3.6140     | 19.81    | ✅
-grud           | mcar      | 0.10  | -          | -        | ⏳grud           | mcar      | 0.10  | 3.6177     | 60.00    | ✅
-mymodel        | mcar      | 0.30  | -          | -        | ⏳mymodel        | mcar      | 0.30  | 3.4274     | 94.12    | ✅
-vcaan          | mcar      | 0.30  | -          | -        | ⏳vcaan          | mcar      | 0.30  | 3.7531     | 0.44     | ✅
-locf           | mcar      | 0.30  | -          | -        | ⏳locf           | mcar      | 0.30  | 3.7896     | 0.01     | ✅
-knn            | mcar      | 0.30  | -          | -        | ⏳knn            | mcar      | 0.30  | 3.7675     | 4.70     | ✅
-mice           | mcar      | 0.30  | -          | -        | ⏳mice           | mcar      | 0.30  | 3.7743     | 4.23     | ✅
-saits          | mcar      | 0.30  | -          | -        | ⏳saits          | mcar      | 0.30  | 3.5258     | 82.43    | ✅
-itransformer   | mcar      | 0.30  | -          | -        | ⏳itransformer   | mcar      | 0.30  | 3.5505     | 21.07    | ✅
-grud           | mcar      | 0.30  | -          | -        | ⏳grud           | mcar      | 0.30  | 3.5388     | 58.20    | ✅
-mymodel        | mcar      | 0.50  | -          | -        | ⏳mymodel        | mcar      | 0.50  | 3.8503     | 123.07   | ✅
-vcaan          | mcar      | 0.50  | -          | -        | ⏳vcaan          | mcar      | 0.50  | 3.9270     | 0.46     | ✅
-locf           | mcar      | 0.50  | -          | -        | ⏳locf           | mcar      | 0.50  | 3.9521     | 0.01     | ✅
-knn            | mcar      | 0.50  | -          | -        | ⏳knn            | mcar      | 0.50  | 3.9062     | 4.66     | ✅
-mice           | mcar      | 0.50  | -          | -        | ⏳mice           | mcar      | 0.50  | 3.9022     | 4.30     | ✅
-saits          | mcar      | 0.50  | -          | -        | ⏳saits          | mcar      | 0.50  | 3.9931     | 71.81    | ✅
-itransformer   | mcar      | 0.50  | -          | -        | ⏳itransformer   | mcar      | 0.50  | 3.9435     | 15.68    | ✅
-grud           | mcar      | 0.50  | -          | -        | ⏳grud           | mcar      | 0.50  | 4.1637     | 48.73    | ✅
-mymodel        | seq       | 0.10  | -          | -        | ⏳mymodel        | seq       | 0.10  | 3.4992     | 117.37   | ✅
-vcaan          | seq       | 0.10  | -          | -        | ⏳vcaan          | seq       | 0.10  | 3.5507     | 0.41     | ✅
-locf           | seq       | 0.10  | -          | -        | ⏳locf           | seq       | 0.10  | 3.5979     | 0.01     | ✅
-knn            | seq       | 0.10  | -          | -        | ⏳knn            | seq       | 0.10  | 3.5925     | 4.86     | ✅
-mice           | seq       | 0.10  | -          | -        | ⏳mice           | seq       | 0.10  | 3.5906     | 4.00     | ✅
-saits          | seq       | 0.10  | -          | -        | ⏳saits          | seq       | 0.10  | 3.4723     | 73.64    | ✅
-itransformer   | seq       | 0.10  | -          | -        | ⏳itransformer   | seq       | 0.10  | 3.4771     | 18.40    | ✅
-grud           | seq       | 0.10  | -          | -        | ⏳grud           | seq       | 0.10  | 3.4894     | 63.70    | ✅
-mymodel        | seq       | 0.30  | -          | -        | ⏳mymodel        | seq       | 0.30  | 3.2247     | 106.79   | ✅
-vcaan          | seq       | 0.30  | -          | -        | ⏳vcaan          | seq       | 0.30  | 3.7885     | 0.38     | ✅
-locf           | seq       | 0.30  | -          | -        | ⏳locf           | seq       | 0.30  | 3.8293     | 0.01     | ✅
-knn            | seq       | 0.30  | -          | -        | ⏳knn            | seq       | 0.30  | 3.7892     | 4.86     | ✅
-mice           | seq       | 0.30  | -          | -        | ⏳mice           | seq       | 0.30  | 3.7916     | 4.25     | ✅
-saits          | seq       | 0.30  | -          | -        | ⏳saits          | seq       | 0.30  | 3.5621     | 80.38    | ✅
-itransformer   | seq       | 0.30  | -          | -        | ⏳itransformer   | seq       | 0.30  | 3.5813     | 19.76    | ✅
-grud           | seq       | 0.30  | -          | -        | ⏳grud           | seq       | 0.30  | 3.5862     | 61.98    | ✅
-mymodel        | seq       | 0.50  | -          | -        | ⏳mymodel        | seq       | 0.50  | 3.6356     | 124.25   | ✅
-vcaan          | seq       | 0.50  | -          | -        | ⏳vcaan          | seq       | 0.50  | 3.9520     | 0.31     | ✅
-locf           | seq       | 0.50  | -          | -        | ⏳locf           | seq       | 0.50  | 3.9726     | 0.01     | ✅
-knn            | seq       | 0.50  | -          | -        | ⏳knn            | seq       | 0.50  | 3.9105     | 4.51     | ✅
-mice           | seq       | 0.50  | -          | -        | ⏳mice           | seq       | 0.50  | 3.9277     | 4.26     | ✅
-saits          | seq       | 0.50  | -          | -        | ⏳saits          | seq       | 0.50  | 3.6471     | 74.23    | ✅
-itransformer   | seq       | 0.50  | -          | -        | ⏳itransformer   | seq       | 0.50  | 3.9342     | 14.45    | ✅
-grud           | seq       | 0.50  | -          | -        | ⏳grud           | seq       | 0.50  | 3.9369     | 67.65    | ✅
-mymodel        | scm       | 0.10  | -          | -        | ⏳mymodel        | scm       | 0.10  | 3.3618     | 109.24   | ✅
-vcaan          | scm       | 0.10  | -          | -        | ⏳vcaan          | scm       | 0.10  | 3.7740     | 0.40     | ✅
-locf           | scm       | 0.10  | -          | -        | ⏳locf           | scm       | 0.10  | 3.8181     | 0.01     | ✅
-knn            | scm       | 0.10  | -          | -        | ⏳knn            | scm       | 0.10  | 3.7906     | 5.00     | ✅
-mice           | scm       | 0.10  | -          | -        | ⏳mice           | scm       | 0.10  | 3.7816     | 3.92     | ✅
-saits          | scm       | 0.10  | -          | -        | ⏳saits          | scm       | 0.10  | 3.6866     | 82.02    | ✅
-itransformer   | scm       | 0.10  | -          | -        | ⏳itransformer   | scm       | 0.10  | 3.6962     | 19.17    | ✅
-grud           | scm       | 0.10  | -          | -        | ⏳grud           | scm       | 0.10  | 3.6976     | 63.83    | ✅
-mymodel        | scm       | 0.30  | -          | -        | ⏳mymodel        | scm       | 0.30  | 3.4531     | 86.15    | ✅
-vcaan          | scm       | 0.30  | -          | -        | ⏳vcaan          | scm       | 0.30  | 3.7553     | 0.37     | ✅
-locf           | scm       | 0.30  | -          | -        | ⏳locf           | scm       | 0.30  | 3.7958     | 0.01     | ✅
-knn            | scm       | 0.30  | -          | -        | ⏳knn            | scm       | 0.30  | 3.7791     | 4.70     | ✅
-mice           | scm       | 0.30  | -          | -        | ⏳mice           | scm       | 0.30  | 3.7661     | 4.31     | ✅
-saits          | scm       | 0.30  | -          | -        | ⏳saits          | scm       | 0.30  | 3.5463     | 102.51   | ✅
-itransformer   | scm       | 0.30  | -          | -        | ⏳itransformer   | scm       | 0.30  | 3.5658     | 19.95    | ✅
-grud           | scm       | 0.30  | -          | -        | ⏳grud           | scm       | 0.30  | 3.5555     | 68.62    | ✅
-mymodel        | scm       | 0.50  | -          | -        | ⏳mymodel        | scm       | 0.50  | 3.4873     | 115.46   | ✅
-vcaan          | scm       | 0.50  | -          | -        | ⏳vcaan          | scm       | 0.50  | 3.9311     | 0.34     | ✅
-locf           | scm       | 0.50  | -          | -        | ⏳locf           | scm       | 0.50  | 3.9556     | 0.01     | ✅
-knn            | scm       | 0.50  | -          | -        | ⏳knn            | scm       | 0.50  | 3.9113     | 4.54     | ✅
-mice           | scm       | 0.50  | -          | -        | ⏳mice           | scm       | 0.50  | 3.8994     | 4.27     | ✅
-saits          | scm       | 0.50  | -          | -        | ⏳saits          | scm       | 0.50  | 3.6701     | 111.30   | ✅
-itransformer   | scm       | 0.50  | -          | -        | ⏳itransformer   | scm       | 0.50  | 3.9033     | 14.97    | ✅
-grud           | scm       | 0.50  | -          | -        | ⏳grud           | scm       | 0.50  | 3.6510     | 48.83    | ✅
-🏁 All combinations completed!
-
-Saved log: /Users/lxx/Documents/codes/st-missing-fill/logs/xlx/train.log
-==========================================================
-✅ 跑批完毕！
-⏱️  整个跑批过程总耗时: 0小时 43分钟 21秒
-你可以前往 logs/xlx 查看日志、可视化图表及 summary.csv 汇总数据！
-==========================================================

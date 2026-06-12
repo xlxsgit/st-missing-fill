@@ -3,7 +3,7 @@
     "pattern": "mcar",
     "pi": 0.3,
     "best_hparams": {
-        "knn_neighbors": 7,
+        "knn_neighbors": 5,
         "mice_max_iter": 8,
         "mice_tol": 0.001
     },

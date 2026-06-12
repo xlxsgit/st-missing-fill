@@ -1,0 +1,418 @@
+%% Copyright 2007-2025 Elsevier Ltd
+\documentclass[3p,11pt,authoryear]{elsarticle}
+
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{amsmath, amsfonts, amssymb}
+\usepackage{enumitem}
+\usepackage{color}
+\usepackage {booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{algorithm, algorithmic}
+\usepackage[normalem]{ulem}
+\usepackage{xcolor}
+\journal{Environmental Modelling $\&$ Software}
+
+\begin{document}
+
+\begin{frontmatter}
+\title{Imputation for Spatiotemporal PM2.5 Data via Varying-Coefficient Autoregressive Adversarial Network}
+
+\author[1]{Lingxiao Xiang}
+\author[1]{Haitao Zheng \corref{cor}}
+\affiliation[1]{organization={School of Mathematics},
+	addressline={Southwest Jiaotong University}, 
+	city={Chengdu},
+	postcode={610031}, 
+	state={Sichuan},
+	country={China}}
+\cortext[cor]{Corresponding author.}
+\ead{htzheng@swjtu.edu.cn}
+
+\begin{abstract}
+	Fine particulate matter (PM2.5) poses risks to environmental health, and missing data due to equipment failures and technical issues hinders pollution analysis. To address this issue, this study proposes Varying-Coefficient Autoregressive Adversarial Network (VCAAN) framework to impute these missing values effectively. First, a Varying-Coefficient Autoregressive (VCA), based on vector autoregression and B-spline approximation of time-varying coefficients, is proposed to capture dynamic spatiotemporal dependencies while reducing model complexity. Next, a Convolutional Discriminative Network (CDN) is designed for spatiotemporal imputation. This network leverages convolutional operations to learn spatiotemporal patterns and assess the quality of the imputed values. In addition, a dynamic adversarial loss weighting mechanism is introduced, enabling VCA and CDN to engage in dynamic adversarial interaction and ultimately converge to a balanced solution. Finally, extensive experiments on Beijing PM2.5 data confirm the proposed method's superiority, demonstrating its strong adaptability to various missing scenarios and effectiveness even under a high missing rate.
+\end{abstract}
+
+
+\begin{keyword}
+	Air pollution\sep  Spatiotemporal data imputation\sep Varying-Coefficient Autoregressive\sep Adversarial Network
+\end{keyword}
+
+\end{frontmatter}
+
+\section*{Highlights}
+\begin{itemize}
+	\item An novel hybrid method combining statistical methods and GAN is proposed. 
+	\item The method captures dynamic spatiotemporal dependencies while reducing complexity. 
+	\item A dynamic weight is introduced to balance the generator and the discriminator. 
+	\item Extensive experiments confirm the effectiveness of the proposed method. 
+\end{itemize}
+
+\section*{Software and data availability}
+The data are available at the Beijing Municipal Environmental Monitoring Center\footnote{Url: \href{http://zx.bjmemc.com.cn}{http://zx.bjmemc.com.cn}} and the open-source code can be accessed in the GitHub repository\footnote{GitHub repository: \href{https://github.com/xlxsgit/Repository-for-VCAAN.git}{https://github.com/xlxsgit/Repository-for-VCAAN.git}}, with the meta-information listed below. 
+
+\begin{itemize}
+	\item Name of Repository: Repository-for-VCAAN
+	\item Developers: Lingxiao Xiang
+	\item Contact: \href{perxlx@my.swjtu.edu.cn}{perxlx@my.swjtu.edu.cn}
+	\item Date first available: March 22, 2025
+	\item Program language: Python 3.9-3.12
+	\item The dataset used can be downloaded from the Python library \href{https://github.com/WenjieDu/TSDB}{TSDB} or from the Beijing Municipal Environmental Monitoring Center. 
+\end{itemize}
+
+%% main text
+\section{Introduction}\label{sec:Introduction}
+According to the State of Global Air 2024 report, air pollution has become a major global health threat, with approximately 99\% of the world's population in 2021 exposed to PM2.5 levels exceeding World Health Organization standards \citep{HEI2024}. Particulate matter in the air is commonly classified by aerodynamic diameter into various categories, including PM10 and PM2.5 (with a diameter of up to 10 $\mathrm{\mu m}$ and 2.5 $\mathrm{\mu m}$, respectively). PM10 and PM2.5 are of significant concern due to their adverse health effects. PM10, commonly called inhalable particulate matter, can penetrate the nasal and oral cavities, while PM2.5, known as respirable particulate matter, can reach the bronchioles and alveoli. With a smaller diameter than PM10, PM2.5 remains suspended in the atmosphere for extended periods and can travel longer distances. Consequently, it acts as a critical carrier of toxic and harmful substances, exerting a more profound and widespread impact on human health and air quality \citep{zhu2021attention}.
+
+As a key factor affecting urban air quality, PM2.5 is routinely monitored across multiple sites to provide data on its concentration. These data support research into pollution sources and spatial distribution, enabling a better understanding of urban air quality and formulating effective air pollution control strategies \citep{hedayatzadeh2024pollution}. However, spatiotemporal monitoring data often suffer from missing records due to equipment malfunctions, calibration processes, maintenance, communication issues, or other technical difficulties \citep{Zhu2024AMD}. Such missing values disrupt the coherence of analyses, compromising the accurate assessment of pollution trends and characteristics. This, in turn, delays the formulation and implementation of targeted mitigation measures. The most common techniques for addressing missing values in data modelling include ignoring and replacing the missing data with statistical averages or zeros. However, these methods are suboptimal and can lead to substantial information loss. This issue becomes particularly concerning when a large proportion of the data is missing, as it may introduce significant bias in subsequent spatiotemporal analyses and decision-making processes related to pollution control \citep{zhang2022handling}. 
+Therefore, accurately imputing these missing records is essential for thoroughly evaluating pollution's environmental impacts and developing sustainable air quality management strategies \citep{zhao2025spatiotemporal}. 
+
+Most existing imputation methods assume specific missing mechanisms in their development. The underlying missing data mechanism significantly influences the reliability and effectiveness of imputation techniques \citep{kumar2024revitalizing}. \citet{rubin1976inference} initially described three types of missing data mechanisms. 
+\textbf{Missing completely at random (MCAR)} occurs when the probability of missing data is entirely unrelated to any factors, with each missing value arising purely by chance. 
+\textbf{Missing at random (MAR)} arises when the probability of missing data is unrelated to the value of the missing data itself but depends on other observed factors. For example, during peak electricity usage, monitoring sites may experience missing records due to insufficient power supply. 
+\textbf{Missing not at random (MNAR)} occurs when the probability of missing data depends on the value of the missing data itself, or potentially on external factors, as seen when excessively high PM2.5 concentrations cause particle accumulation on sensor surfaces, impairing the performance of detection components.  
+Beyond these mechanisms, two other missing data patterns frequently encountered in real-world applications are \textbf{Missing in Sequence (MIS)} and \textbf{Missing in Block (MIB)} \citep{du2024tsi}. 
+For instance, in the spatiotemporal data of PM2.5 monitoring sites, MIS refers to continuous missing data at a single site over a specific period, while MIB describes situations where multiple sites experience continuous missing data simultaneously over the same period. These patterns, characterised by their continuity and spatial correlation, pose considerable challenges for data recovery and subsequent analysis.
+
+Traditional methods for missing values imputation, such as Multiple Imputation by Chained Equations (MICE), K-Nearest Neighbors Imputation (KNNI), matrix factorization (MF), and iterative singular value decomposition (iterative SVD), have been widely adopted due to their solid theoretical foundations and ease of implementation \citep{van2000multivariate, cover1967nearest, koren2009matrix, troyanskaya2001missing}. However, these approaches may struggle to capture complex non-linear relationships in real-world datasets. 
+
+Recent studies have extensively explored missing values imputation to address various missingness mechanisms and feature characteristics, evolving from traditional statistical methods to more recent deep learning-based models, such as Generative Adversarial Networks (GANs) \citep{goodfellow2014generative}. 
+\citet{miao2021ssgan} proposed a novel semi-supervised GAN (SSGAN), which improves imputation performance for multivariate time series data by integrating a semi-supervised classifier and a temporal reminder matrix.
+\citet{du2023saits} proposed Self-Attention-based Imputation for Time Series (SAITS) for estimating missing values in multivariate time series, which captures temporal dependencies and feature correlations through two diagonally-masked self-attention (DMSA) blocks. 
+\citet{yuan2024missing} introduced a stacked adaptive median iterative imputation framework (SAMIIF) for missing data recovery in time series. The framework incorporates moving window and dynamic sample overlay techniques, with an adaptive learning mechanism, to iteratively refine the imputation process. 
+\citet{yuan2023attention} proposed an attention-based interval-aided network (AIA-Net) to impute missing values in heterogeneous time series. This method integrates attention-based time-aware dynamic imputation with an interval-aided time-aware module to model temporal dependencies adaptively. 
+SSGAN, SAITS, and SAMIIF are primarily limited to MCAR-type missing data and may degrade significantly in real-world settings where such assumptions rarely hold. At the same time, AIA-Net is not well-suited for the MIB pattern. 
+
+\citet{hu2020tngan} proposed a trinetwork-based GAN (tnGAN), employing scope-aware feature extraction and information-aware feature integration to capture temporal evolution and spatial similarity better. This method may be less effective in handling high missing rates, as evaluation was limited to moderate missing conditions (not exceeding 33.33\%).
+\citet{hu2021hierarchical} proposed a hierarchical GAN-based data recovery method designed to handle varying numbers of incomplete data. A joint attention module was introduced to extract spatiotemporal dependencies and integrate cross-layer features. However, this proposed method requires complete data pairs for training, which may not always be available in practice.
+\citet{liu2023itransformer} proposed Inverted Transformers (iTransformer), which applies attention and feed-forward networks to inverted dimensions. It embeds time points into variable tokens to better capture multivariate correlations and non-linear representations. Nonetheless, its performance advantages may be limited in scenarios with no external feature variables \citep{zhang2022handling, radivsic2023impact}.  
+
+\citet{che2018grud} proposed the Gated Recurrent Unit with trainable Decays (GRUD), which incorporates a decay mechanism to model the impact of missing values over time. 
+\citet{ou2024missing} proposed a Position-Encoding Denoising Autoencoder (PE-DAE) for imputing missing data in time series. This method leverages temporal autocorrelation and the positions of missing values, integrating a self-paced learning training strategy to enhance performance. 
+Although effective in practice, GRUD and PE-DAE involve model components that must be carefully adapted to the characteristics of the target data, making them less flexible across diverse applications. For instance, GRUD requires domain-specific design of its decay mechanism, while PE-DAE involves tuning parameters for the self-paced learning strategy, which can be challenging in practice. 
+
+In this study, we propose a Varying-Coefficient Autoregressive Adversarial Network (VCAAN) framework for the imputation of missing values in spatiotemporal data. 
+This framework first utilizes a Varying-Coefficient Autoregressive model (VCA) to thoroughly incorporate the correlations between missing data and historical, future, and surrounding information. By capturing the dynamic dependencies inherent in spatiotemporal data, VCA also requires estimating fewer parameters than Vector Autoregressive (VAR) \citep{sims1980macroeconomics}.
+Subsequently, we design a Convolutional Discriminative Network (CDN) to assess the imputed missing values, training it adversarially alongside the VCA. To further enhance robustness, we introduce a dynamic adversarial loss weighting mechanism, which mitigates overfitting to a certain extent during training (inspired by \citep{du2023saits, huang2024sdnet}). Notably, the proposed method enables joint training and imputation on incomplete datasets, eliminating the need for separate training and testing phases. It operates without requiring external feature variables and offers a versatile framework that can be applied to a wide range of imputation tasks. Finally, a series of experiments using the PM2.5 concentration data in Beijing is conducted to validate the effectiveness of the proposed method. 
+In particular, the main contributions of this study are as follows. 
+\begin{itemize}
+	\item [1)] A novel hybrid method is proposed that integrates statistical methods with deep learning into a unified framework. This method provides enhanced robustness and flexibility, enabling effective imputation across diverse real-world missing data types and high missing rate scenarios. 
+	\item [2)] A VCA module is introduced to jointly capture the relationships between missing values and their temporal-spatial context, including historical, future, and adjacent locations. The module also effectively models the intrinsic dynamic dependencies in spatiotemporal data, all within a simplified model structure. 
+	\item [3)] A CDN module is specifically designed for spatiotemporal imputation and integrated with VCA through adversarial training. Furthermore, a dynamic adversarial loss weighting mechanism enhances adaptability in challenging scenarios. 
+	\item [4)] Extensive experiments are performed to evaluate the performance of the proposed method and competitive methods. The proposed method shows general advantages under various scenarios. 
+\end{itemize}
+
+\section{Data and methodology}\label{sec:Data and methodology}
+\subsection{Data}\label{subsec:Data}
+The North China Plain, which surrounds Beijing, experiences the most severe air pollution in the country, characterized by excessively high PM2.5 concentrations. Due to the complexity of its topography and climate, coupled with the urban heat island effect and anthropogenic emissions resulting from rapid urbanization, Beijing's air pollutants (particularly PM2.5) exhibit significant spatiotemporal variability \citep{deng2017spatiotemporal, zhang2017cautionary}. 
+
+The PM2.5 concentration data used in this study were obtained from 12 state-controlled monitoring sites managed by the Beijing Municipal Environmental Monitoring Center. The dataset contains hourly PM2.5 concentration data (values ranging from 3 to 558 $\mu\mathrm{g/m^3}$) recorded between 1 March and 30 March 2013, totalling 8,640 observations with about 0.53\% missing values. The spatial distribution of the monitoring sites is illustrated in Fig. \ref{fig:locations}. 
+
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[scale=.35]{fig_locations}
+	\caption{Locations of the 12 air quality monitoring sites in Beijing. Red dots represent the eight sites in the central region: Aotizhongxin, Dongsi, Guanyuan, Gucheng, Nongzhanguan, Tiantan, Wanliu, and Wanshouxigong. The two northwest sites (Changping and Dingling) are marked in blue, and the two northeast sites (Huairou and Shunyi) are shown in purple.}
+	\label{fig:locations}
+\end{figure}
+
+Fig. \ref{fig:over_hist_lines} presents basic information on the original research data. Fig. \ref{fig:over_hist_lines} (a) displays the box plot of PM2.5 concentrations across all monitoring sites. The lower and upper quartiles are approximately 26 and 152 $\mu\mathrm{g/m^3}$, respectively. The data from each site exhibits a certain degree of heavy-tailed distribution. Then, we standardized the data from each site using Z-scores to address the issue of varying PM2.5 concentration scales across different monitoring sites. Fig. \ref{fig:over_hist_lines} (b) shows that there are long, continuous missing parts at some of the sites, while the PM2.5 concentration varies greatly at some moments, making the imputation of the missing value more challenging. However, we also note that some sites show similar trends, which suggests that we can consider modelling the spatiotemporal relationships between sites. 
+
+\begin{figure}[htbp]
+	\centering
+	\begin{subfigure}[b]{0.49\textwidth}
+		\includegraphics[width=\textwidth]{fig_over_boxs}
+		\caption{Box plot of PM2.5 concentration at all sites}
+		\label{fig:sub:over_hist}
+	\end{subfigure}
+	\hfill
+	\begin{subfigure}[b]{0.49\textwidth}
+		\includegraphics[width=\textwidth]{fig_over_lines}
+		\caption{Standardised PM2.5 concentration at each site}
+		\label{fig:sub:over_lines}
+	\end{subfigure}
+	\caption{The characteristics of the PM2.5 concentration data.}
+	\label{fig:over_hist_lines}
+\end{figure}
+
+\subsection{Problem definition}\label{subsec:Problem definition}
+Let $\mathbf{Y}= [\boldsymbol{y}_1,  \cdots,  \boldsymbol{y}_S]^{\prime} \in \mathbb{R}^{S\times T}$ represent the spatiotemporal PM2.5 concentration data from $S$ air quality monitoring sites, where $\boldsymbol{y}_s \in \mathbb{R}^{T\times 1} (s=1,\cdots,S)$ denotes the time series of site $s$, and $\boldsymbol{y}_{\cdot, t} \in \mathbb{R}^{S\times 1}$ represents the data from all sites at time $t$. 
+In the presence of missing records, a missing indicator matrix $\mathbf{M} = (m_{s,t})\in \mathbb{R}^{S\times T}$ is defined as $m_{s,t}=1$ if $y_{s,t}$ is missing and $m_{s,t}=0$ if $y_{s,t}$ is observed. This missing indicator matrix characterises the missing data pattern. 
+Additionally, let $\widetilde{\mathbf{Y}} \in \mathbb{R}^{S\times T}$ denote the complete ground truth data, including the missing values. Given an imputed dataset $\widehat{\mathbf{Y}} \in \mathbb{R}^{S\times T}$, the objective is to minimize the discrepancy between the imputed data $\widehat{\mathbf{Y}}$ and the ground truth data $\widetilde{\mathbf{Y}}$. 
+In this study, the model's performance is assessed using Mean Squared Error (MSE) at the missing positions, defined as follows:
+\begin{equation}\label{eq:mse}
+	\mathrm{MSE}(\widehat{\mathbf{Y}}, \widetilde{\mathbf{Y}}, \mathbf{M}) = 
+	\frac{\sum_{s=1}^{S} \sum_{t=1}^{T} \lvert (\hat{y}_{s,t}-\tilde{y}_{s,t}) \cdot m_{s,t} \rvert^2} {\sum_{s=1}^{S} \sum_{t=1}^{T}  m_{s,t} }
+\end{equation}
+
+\subsection{Methodology framework}\label{subsec:Methodology framework}
+Fig. \ref{fig:flowchart} outlines the framework of the proposed VCAAN in this study. 
+As illustrated, the two data matrices on the left represent incomplete data and pre-imputed data, respectively. The white regions indicate observed values, the grey regions represent missing values, and the light beige regions denote pre-imputed values obtained by an existing algorithm. 
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[scale=.6]{fig_framework}
+	\caption{Methodology framework. }
+	\label{fig:flowchart}
+\end{figure}
+
+The VCAAN framework consists of two mutually adversarial components: a generator and a discriminator. The former is the VCA, designed to impute missing values, while the latter is the CDN, aimed at distinguishing imputed values from real values as accurately as possible. The objective of the VCAAN framework is to minimize the estimation error of VCA, while simultaneously making it challenging for CDN to differentiate between imputed and real values. The details of VCA, CDN, and their adversarial training process are in Sections \ref{subsec:G}, \ref{subsec:D}, and \ref{subsec:Ap}, respectively.
+
+\subsection{Varying-Coefficient Autoregressive}\label{subsec:G}
+To account for the correlations between missing data and historical, future, as well as surrounding information during imputation, while simultaneously capturing the dynamic dependencies inherent in spatiotemporal data, we propose the following VCA: 
+\begin{align}\label{eq:g_raw}
+	y_{s,t} 
+	= & \sum_{l=-L(\neq 0)}^{L} \alpha_l(t) \cdot \hat{y}_{s, t+l}^{(i)} \notag \\
+	& + \sum_{l=-L}^{L} \beta_l(t) \cdot \sum_{s^{\prime} =1}^{S} (w_{s,s^{\prime} }  \hat{y}_{s^{\prime}, t+l}^{(i)}) + \epsilon_{s,t}
+\end{align}
+where $y_{s,t}$ represents the response variable that may contain missing values,
+$\widehat{\mathbf{Y}}^{(i)} = (\hat{y}_{s,t}^{(i)})$ denotes the imputed dataset obtained in the $i$-th iteration, and $\widehat{\mathbf{Y}}^{(0)}$ refers to the preliminary imputed dataset via an existing algorithm. The spatial weight $w_{s,s^{\prime} }$ is derived by calculating the Pearson correlation coefficients between site $s$ and $s^{\prime}$, with $w_{s,s}=0$ set to avoid ``information leakage''. $L$ is the lag order (in both directions).
+Both $\alpha_l(t)$ and $\beta_l(t)$ are coefficient functions that vary over time, and the varying-coefficient model degenerates to a constant-coefficient model when $\alpha_l(t)=\alpha_l$ and $\beta_l(t)=\beta_l$. The random error term $\epsilon_{s,t}$ is assumed to follow a specific distribution with a mean of zero and a standard deviation of $\sigma_{\epsilon}$, denoted as $\epsilon_{s,t} \stackrel{\text{i.i.d}}{\sim} N(0,\sigma_{\epsilon}^2) $.  
+
+Fig. \ref{fig:G_schema} intuitively illustrates the idea of VCA. The orange-bordered cell represents the imputation target. The two purple-bordered cells indicate the target site's historical and future information, respectively. Based on the lag order, the information from neighbouring sites is divided into three parts: historical (red), current (green), and future (blue) information.
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[scale=.4]{fig_VCA_schema}
+	\caption{Schematic diagram of VCA. }
+	\label{fig:G_schema}
+\end{figure}
+
+To simplify the theoretical notation, we sequentially employ the following universal symbols to represent the terms concisely (e.g., $\hat{y}_{s,t-L}^{(i)}$, $\sum_{s^{\prime} =1}^{S} (w_{s^{\prime}, s}  \hat{y}_{s^{\prime}, t+L}^{(i)})$) and their coefficients in Eq. (\ref{eq:g_raw}):
+\begin{equation}\label{eq:abbr_x}
+	x_{s,t}^{1, (i)} \triangleq \hat{y}_{s,t-L}^{(i)}, \cdots, 
+	x_{s,t}^{4L+1, (i)} \triangleq \sum_{s^{\prime} =1}^{S} (w_{s^{\prime}, s}  \hat{y}_{s^{\prime}, t+L}^{(i)})
+\end{equation}
+\begin{equation}\label{eq:abbr_gamma}
+	\gamma_1(t) \triangleq \alpha_{-L}(t), \cdots,
+	\gamma_{4L+1}(t) \triangleq \beta_{L}(t)
+\end{equation}
+Therefore, Eq. (\ref{eq:g_raw}) can be expressed in the following form:
+\begin{equation}\label{eq:g_x}
+	y_{s,t} = \sum_{q=1}^{4L+1} \gamma_q(t) x_{s,t}^{q, (i)} + \epsilon_{s,t}
+\end{equation}
+
+The varying coefficients are unknown functions, and B-spline basis functions are utilized to approximate the time-varying coefficients \citep{cox1972numerical, de1972calculating, luo2023using}. First, to ensure numerical stability, we replace the time index $t$ with normalized time $z_t = \frac{t}{T+1}$ in this part, keeping $t$ unchanged in all other parts, i.e., $\gamma_{q}(t) = \gamma_{q}(\frac{t}{T+1}) = \gamma_{q}(z_t)$. We define equidistant knots as $\kappa_k=K_T^{-1}k, (k=-p+1,\cdots,K_T+p)$, where $K_T-1$ is the number of knots within the range (0, 1), and $p+1$ is the order of the B-spline function. The time-varying coefficient component can be approximated in the following way: 
+\begin{equation}
+	\gamma_q(z_t) = \boldsymbol{B}^{\prime}(z_t) \boldsymbol{b}_q,  q=1,2,\cdots,4L+1
+\end{equation}
+where $\boldsymbol{B}(z_t)$ is the $(p+1)$-th order B-spline basis, and $\boldsymbol{b}_q$ is a coefficient vector of size $(K_T+p)\times1$ corresponding to $\gamma_q(z_t)$. Then equation (\ref{eq:g_x}) can be written as:
+\begin{equation}\label{eq:g_bs}
+	y_{s,t} = \sum_{q=1}^{4L+1} \boldsymbol{B}^{\prime}(z_t) \boldsymbol{b}_q x_{s,t}^q + \epsilon_{s,t}
+\end{equation}
+Thus, only the parameters $\boldsymbol{b} = [\boldsymbol{b}_1,\cdots,\boldsymbol{b}_{4L+1}]^{\prime}$ are unknown, and the estimation of these parameters will be provided in Section \ref{subsec:Ap}. 
+
+\subsection{Convolutional Discriminative Network}\label{subsec:D}
+Following the standard design of GANs, we have developed the CDN to compete with the VCA and generate more accurate imputed values \citep{goodfellow2014generative, geng2022intelligent}. Since the generative task explored in this study involves imputing missing values in spatiotemporal data, training solely based on imputed values at isolated spatiotemporal locations would make it difficult to adequately capture the spatiotemporal dependencies among data points. This, in turn, would make it challenging to accurately assess spatiotemporal consistency in the generated results, ultimately leading to ineffective discriminator training.
+
+Similar to traditional generative tasks in deep learning, such as image or video generation, we treat continuous temporal spans of length $\tau$ as individual samples for modelling. After inputting spatiotemporal data with a continuous temporal span of length $\tau$, the model outputs a probability matrix of the same shape, where each value represents the probability that the corresponding point is an imputed value rather than a true observation. Specifically, the discriminator CDN is characterized by the mapping $D \in \{f: \mathbb{R}^{S\times\tau} \mapsto [0, 1]^{S\times\tau} \}$, where $S$ denotes the number of sites and $\tau$ is the length of the continuous temporal span.\footnote{In deep learning terminology, the number of sites is also referred to as the number of channels, and the length of the continuous temporal span is referred to as the time steps. The network will extract features along the time dimension.} In this study, $\tau$ is set to 24, indicating that we model the data as a whole over the duration of one day. 
+
+The structure of the designed CDN is illustrated in Fig. \ref{fig:D_structure}. 
+To start with, we pass the input data through three convolutional blocks, each consisting of a similar structure as follows:
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[scale=.48]{fig_CDN_structure}
+	\caption{The structure of the CDN.}
+	\label{fig:D_structure}
+\end{figure}
+
+\begin{description}
+	\item[(a) Convolutional Layer.] The convolution operation uses a kernel of size 3 with a stride of 1 (using padding of 1). Since features are extracted only along the time dimension, we consider only the length, not the width. (This operation does not alter the shape along the time step dimension.) The kernels increase progressively across the three blocks (32, 64, and 128). 
+	\item[(b) Batch Normalization.] After the convolution layer, to reduce the variance in the input data across layers and ensure that gradients propagate more stably through the deep network, we adjust the output distribution of the previous layer to have zero mean and unit variance \citep{ioffe2015batch}. 
+	\item[(c) Activation Function.] The output is passed through a Rectified Linear Unit (ReLU) activation function. 
+	\item[(d) Pooling Layer.] A max pooling layer with a kernel size and stride of 2 is applied, reducing the dimensionality of the feature map and performing feature extraction \citep{lecun1998gradient}. (This operation halves the shape along the time step dimension.) 
+\end{description}
+
+Next, we flatten the output of the final convolutional block and pass it through two Fully Connected Layers (FC). The first FC uses ReLU as the activation function and applies dropout (randomly ``dropping'' a portion of neurons to reduce the model's over-reliance on specific neurons, thereby improving generalization). The second FC follows the standard form, using the sigmoid activation function to output the ``imputation probabilities'' for the $S$ sites. Then, these probabilities are extended along the second dimension, with each probability repeated 24 times. 
+It is worth noting that this results in the CDN providing a consistent evaluation of missing values for each site for an entire day, quantifying the proportion of imputed values in the imputed data for each site (i.e., the probability that the time series for that site does not conform to the true distribution). 
+
+This design has two primary purposes. Firstly, the FC outputs a simpler form and captures global features even with a lower output dimensionality, rather than making predictions row by row (row-by-row predictions may focus more on local patterns and lack overall consistency). Secondly, the ultimate goal of this study is to optimize the VCA, with the core function of the CDN not being to achieve absolute accuracy in differentiation, but to provide feedback signals to guide VCA closer to the true data distribution. Therefore, simplicity and efficiency are prioritized in the design of CDN. 
+
+\subsection{Adversarial process}\label{subsec:Ap}
+This section describes the specific algorithm of the VCAAN, which involves the adversarial training process of the VCA and the CDN. Algorithm \ref{algo:Ap} outlines the adversarial training process. The input consists of the following: the data to be imputed $\mathbf{Y}$, the pre-imputed data $\widehat{\mathbf{Y}}^{(0)}$, the missing indicator matrix $\mathbf{M}$, the number of iterations $K$, the convergence precision threshold $\xi$, the initial value of the dynamic adversarial loss weight $\lambda_0$, and its variation magnitude $\delta_\lambda$. The final output is the imputed values of VCAAN, denoted by $\widehat{\mathbf{Y}}$. 
+
+\begin{algorithm}[t]
+	\caption{Adversarial Process}\label{algo:Ap}
+	\begin{algorithmic}[1]
+		\REQUIRE $\mathbf{Y}, \widehat{\mathbf{Y}}^{(0)}, \mathbf{M}, K, \xi, \lambda_0,  \delta_\lambda$
+		\ENSURE $\widehat{\mathbf{Y}}$
+		
+		\STATE /* The parameters $\boldsymbol{b}$ and $\boldsymbol{\phi}$, corresponding to VCA and CDN respectively, are defined in Sections \ref{subsec:G} and \ref{subsec:D}. 
+		\STATE /* The terms $L_1^{(i)}$, $L_2^{(j)}$, and $L_{12}^{(j)}$ are defined in Eqs. (\ref{eq:loss_G}), (\ref{eq:loss_D}), and (\ref{eq:loss_GD}), respectively. 
+		\STATE $L_1^{\prime} \gets \inf, L_{12}^{\prime} \gets \inf $ \hfill /* Initialize Loss
+		
+		\FOR{$i \gets 1$ to $K$}
+		\STATE $\hat{\boldsymbol{b}}^{(i)} \gets \arg\min_{\boldsymbol{b}} L_1^{(i)}$ \hfill /* Update VCA 
+		\STATE $\widehat{\mathbf{Y}}^{(i)} \gets \sum_{q=1}^{4L+1} \boldsymbol{B}^{\prime}(z_t) \hat{\boldsymbol{b}}^{(i)}_q x_{s,t}^{q, (i-1)}$
+		\IF{$|L_1^{(i)} - L_1^{\prime}| < \xi$}
+		\STATE break
+		\ENDIF
+		\STATE $L_1^{\prime} \gets L_1^{(i)} $
+		\ENDFOR
+		
+		\STATE /* Adversarial Process 
+		\FOR{$j \gets i+1$ to $i+K$}
+		\STATE $\hat{\boldsymbol{\phi}}^{(j)} \gets \arg\min_{\boldsymbol{\phi}} L_2^{(j)}$ \hfill /* Update CDN 
+		\STATE $\hat{\boldsymbol{b}}^{(j)} \gets \arg\min_{\boldsymbol{b}} L_{12}^{(j)}$ \hfill /* Update VCA 
+		\STATE $\widehat{\mathbf{Y}}^{(j)} \gets \sum_{q=1}^{4L+1} \boldsymbol{B}^{\prime}(z_t) \hat{\boldsymbol{b}}^{(j)}_q x_{s,t}^{q, (j-1)}$
+		\IF{$|L_{12}^{(j)} - L_{12}^{\prime}| < \xi$}
+		\STATE break
+		\ENDIF
+		\STATE $L_{12}^{\prime} \gets L_{12}^{(j)} $
+		\ENDFOR
+		\RETURN $\widehat{\mathbf{Y}} \gets \widehat{\mathbf{Y}}^{(j)}$
+	\end{algorithmic}
+\end{algorithm}
+
+First, we train the VCA proposed in Section \ref{subsec:G} independently using the MSE of the observed data as the loss function (Eq. (\ref{eq:loss_G})). The imputed values obtained from this training are then iteratively refined by being used as the new pre-imputed data in subsequent iterations. 
+\begin{equation}\label{eq:loss_G}
+	L_1^{(i)} = \sum_{s=1}^{S} \sum_{t=1}^{T} (1-m_{s,t}) (y_{s,t} 
+	-  \sum_{q=1}^{4L+1} \boldsymbol{B}^{\prime}(z_t) \boldsymbol{b}_q x_{s,t}^{q, (i-1)} )^2 \\
+\end{equation}
+where $\boldsymbol{b}=[\boldsymbol{b}_1,\cdots,\boldsymbol{b}_{4L+1}]^{\prime}$ and $x^{q, (i)}_{s,t}$ are defined by Eq. (\ref{eq:abbr_x}). If the change in the model's loss is less than the given convergence threshold $\xi$, the training for this phase is terminated early. 
+
+Then, we perform adversarial training between VCA and CDN, as described in Sections \ref{subsec:G} and \ref{subsec:D}, optimising the discriminator and the generator in turn. 
+For the $i$-th iteration of CDN, the imputed values generated from the $(i-1)$ -th iteration of VCA are used as input, and the binary cross-entropy function is employed as the loss function for optimization, as shown in Eq. (\ref{eq:loss_D}):
+\begin{align}\label{eq:loss_D}
+	L_2^{(j)} = &\sum_{s=1}^{S} \sum_{t=1}^{T} 
+	\{m_{s,t} \log D(\boldsymbol{\phi}, \widehat{\mathbf{Y}}^{(j-1)})_{s,t} \notag \\
+	&+(1-m_{s,t}) \log (1-D(\boldsymbol{\phi}, \widehat{\mathbf{Y}}^{(j-1)})_{s,t}\}
+\end{align}
+
+For the $j$-th iteration of VCA, a cross-entropy loss\footnote{Unlike Eq. (\ref{eq:loss_D}), it discriminates against the estimated value of VCA in the next round rather than the current round. } with a dynamic adversarial loss weight $\lambda$ is incorporated into the original loss function (Eq. (\ref{eq:loss_G})) to establish an adversarial interaction with CDN as shown in Eq. (\ref{eq:loss_GD}): 
+\begin{equation}\label{eq:loss_GD}
+	L_{12}^{(j)} = L_{1}^{(j)} - \lambda L_2^{(j+1)}
+\end{equation}
+where the dynamic adversarial loss weight $\lambda$ defaults to $\lambda_0$ and is adjusted dynamically based on the current loss values of VCA and CDN. To prevent the impact of scale differences between the losses of VCA and CDN, $\lambda$ is adjusted as follows: if the constraint $|\lambda L_2| \geq |L_1 / 5|$ is satisfied, $\lambda$ retains its default value; otherwise, $\lambda$ is reduced by $\delta_\lambda$ iteratively until the constraint is met. Similarly, if the change in loss becomes smaller than the given convergence threshold $\xi$, the training for this phase is terminated early. The final iteration results are then output as the imputed values $\widehat{\mathbf{Y}}$ of VCAAN. 
+
+\section{Experiments}\label{sec:Experiments}
+\subsection{Experimental settings}\label{subsec:Experimental setup}
+All experiments were conducted on a laptop equipped with an NVIDIA GeForce RTX 3050 Laptop GPU , an Intel(R) Core(TM) i5-12500H CPU operating at 2.50 GHz. The experimental environment utilized Python 3.11.10, PyTorch 2.5.1+cu121 and  Pygrinder 0.6.4 \citep{du2023pypots}. To obtain a comprehensive comparison, we evaluate the proposed method against seven mainstream baseline models. 
+(1) \textbf{MICE}\citep{van2000multivariate}. 
+(2) \textbf{KNNI}\citep{cover1967nearest}. 
+(3) \textbf{Last Observation Carried Forward (LOCF)}. It imputes missing values using the most recently observed non-missing value; 
+(4) \textbf{GRUD}\citep{che2018grud}; 
+(5) \textbf{SSGAN}\citep{miao2021ssgan}; 
+(6) \textbf{SAITS}\citep{du2023saits} and 
+(7) \textbf{iTransformer}\citep{liu2023itransformer}. 
+
+The optimal hyperparameters for each method are selected from set ranges. The maximum number of iterations of MICE is selected from \{\textbf{10},20,30\}. (The optimal parameters have been bolded, similarly hereinafter.) The number of nearest neighbors in KNNI is selected from the set \{1,2,3,4,\textbf{5}\}. No parameter settings are required for LOCF. For GRUD and SSGAN, the hidden size of the Recurrent Neural Network cell is selected from the set \{32, \textbf{64}, 128\}. For SAITS and iTransformer, the number of Transformer layers, the number of attention heads, the query/key dimensionality, the value dimensionality, the embedding dimension, and the intermediate feed-forward network dimension are each selected from the range \{2, \textbf{4}\}, \{2,\textbf{4}\}, \{4,\textbf{8}\}, \{4,8,16,\textbf{32}\}, \{8,16,\textbf{32}\}, \{32,\textbf{64},128\}. The epoch is chosen from the range \{50, \textbf{100}, 150, 200\} for the last four deep learning methods. 
+For the proposed VCAAN, we use the simplest LOCF as the pre-imputation algorithm, and the order of B-splines is selected from \{3,4,\textbf{5}\}; VCA and CDN are optimized using full batch gradient descent, and the corresponding maximum training epochs are selected from \{\textbf{50},100,150,200\}; In Algorithm \ref{algo:Ap}, the hyperparameters $K$, $\xi$, $\lambda_0$, and $\delta_\lambda$ are chosen from the sets \{5,\textbf{10},15,20\}, \{\textbf{0.0001},0.001,0.01\}, \{−0.2,\textbf{−0.1},0,0.1,0.2\}, and \{\textbf{0.1},0.2,0.3,0.4,0.5\}, respectively. 
+
+We considered five different missing rates and five distinct missing types to fully replicate real-world missing data scenarios. 
+(1) \textbf{Different missing rates} can affect the performance of most imputation methods. \citet{lin2020missing} classified missing rates into three categories: low (less than 30\%), medium (30\% to 50\%), and high (greater than 50\%). We selected five representative missing rates (10\%, 30\%, 50\%, 70\%, and 90\%) to provide a more comprehensive evaluation of imputation performance across varying levels of data incompleteness. Due to the construction approach adopted in this study, the MIS missing pattern could not achieve missing rates of 70\% and 90\%. Therefore, 55\% and 60\% were used instead. 
+(2) \textbf{The missing types} we considered include three missing mechanisms and two missing patterns. The missing mechanism refers to the underlying process that causes missing values, while the missing pattern describes how these missing values are represented in the dataset. 
+Fig. \ref{fig:miss_types} illustrates the characteristics and distinctions among the missing mechanisms and patterns. Their simulation procedures are described in detail below.
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[scale=.35]{fig_miss_types}
+	\caption{Schematic diagram of five missing types. In the third subplot, the missing areas are highlighted with red borders, indicating that the missing values are larger values.}
+	\label{fig:miss_types}
+\end{figure}
+
+\begin{description}
+	\item[(1) MCAR] Data were selected to be missing with a specified probability $\rho$\footnote{The $\rho$ value is manually adjusted for each missing scenario to achieve the desired overall missing rate.}, which controls the overall missing rate. 
+	\item[(2) MAR] We simulated a time-dependent missingness scenario. Specifically, the missing probability is modeled by an intensity function $f(t) = \exp(3 \sin(w \times t + b))$, where $w = 24$ and $b = 6$ represent the angular frequency and phase shift of the intensity function, respectively. The overall missing rate is controlled by a scaling parameter $\rho$. 
+	\item[(3) MNAR] Specifically, for the time series $\boldsymbol{y}_s$ at site $s$, the overall missing rate is controlled by the scaling parameter $\rho$, and any data greater than $\overline{\boldsymbol{y}}_s+\rho \sigma_{\boldsymbol{y}_s}$ is set as missing, where $\overline{\boldsymbol{y}}_s$ and $\sigma_{\boldsymbol{y}_s}$ are the mean and standard deviation of the sequence, respectively\citep{bruun2020not}. 
+	\item[(4) MIS] The missing data in the missing indicator matrix appears as long, sequential strips, with the missing regions forming randomly occurring line segments of length $l = 12$. The scaling parameter $\rho$ controls the overall missing rate. 
+	\item[(5) MIB] The missing data in the missing indicator matrix appears in block shapes, with the missing regions forming randomly occurring squares of side length $d = 7$. The scaling parameter $\rho$ controls the overall missing rate. 
+\end{description}
+
+\subsection{Comparison of Model Performance}\label{subsubsec:Comparison of model performance}
+Based on the setup outlined in Section \ref{subsec:Experimental setup}, we comprehensively compared the proposed VCAAN with seven baseline models. Fig. \ref{fig:Model compare} illustrates the performance of each model under five missing data scenarios and across five missing rate levels. 
+
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[scale=.63]{fig_comparison}
+	\caption{Comparison of model performance under varying missing conditions.}
+	\label{fig:Model compare}
+\end{figure}
+
+The proposed model demonstrates the best performance across all five missing rates for MCAR (green), MAR (blue), and MIB (orange) missing types. Under the MNAR (red) scenario, our model remains within the top two in terms of performance. In the MIS (purple) setting, the proposed model consistently ranks within the top two, except at a missing rate of 50\%, where its performance drops slightly. Moreover, the proposed model performs significantly better under high missing rates (exceeding 50\%) or complex missing mechanisms, but this advantage is less pronounced in the MNAR case. 
+
+Furthermore, it is evident that classical statistical methods tend to outperform deep learning-based models under low missing rates for a fixed missing data type. Conversely, deep learning-based models  generally exhibit superior performance when the missing rate is high. 
+When examining the missing data types at a fixed missing rate, the imputation performance of all models decreases progressively with the increasing complexity of the missing mechanisms, from MCAR to MAR and then to MNAR. (Note that the MIS and MIB types were not considered here due to the potential influence of parameter settings during their construction on the imputation results.)
+
+\subsection{Ablation Study}\label{subsubsec:Ablation Study}
+We conducted a series of ablation experiments to validate the contribution of different structures in the proposed VCAAN to the spatiotemporal imputation of PM2.5 concentrations. By sequentially removing or replacing key modules in the model, we quantified the impact of each component on the final prediction performance. Specifically, we removed the adversarial mechanism from VCAAN, resulting in an imputation model that only includes the VCA component. Next, we considered the scenario where the coefficients of the autoregressive model are constant, leading to the Constant-Coefficient Autoregressive (CCA) model and the Constant-Coefficient Autoregressive Adversarial Network (CCAAN). Additionally, to investigate the influence of the pre-imputation algorithm used in the proposed model on the final results, we evaluated seven baseline models as pre-imputation algorithms. 
+
+As illustrated in Fig. \ref{fig:ablation}, the complete model consistently achieves better performance than its incomplete counterpart under all MCAR (green) and MAR (blue) settings and in MIB patterns with missing rates between 10\% and 50\%, except in two cases: MCAR-iTransformer at 90\% and MIB-SSGAN at 10\%. For the MIB missing pattern at 70\% and 90\% missing rates, the best-performing models are the complete model VCAAN, followed by the incomplete model VCA and then CCAAN. This ranking suggests that VCA and CDN contribute positively to the overall performance. For the missing data types of MNAR (red) and MIS (purple), the optimal model tended to favor the complete model (VCAAN) at 10\% missing rates, while from 30\% to 90\% missing rates for MNAR, it leaned towards CCAAN, and for Seq, it favored VCA under medium and high missing rates. 
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[scale=.48]{fig_ablation}
+	\caption{VCAAN and its variants performance comparison in MCAR, MAR, MNAR, MIS and MIB.}
+	\label{fig:ablation}
+\end{figure} 
+
+Additionally, it can be observed that in the cases of MCAR and MAR, the proposed model and its variants are almost unaffected by the pre-imputation algorithm, with the final results tending to converge\footnote{The term ``converge'' or ``convergence'' here denotes that distinct pre-imputation algorithms lead to comparable outcomes, suggesting robustness and consistency in performance.}. For MIS, convergence is generally achieved across 10\% to 55\% of missing rates. Only CCAAN and the complete model show approximately convergent results for MNAR. In contrast, the convergence behavior under the MIB pattern is relatively less stable. When considering MNAR, MIS, and MIB missing data scenarios, the complete model and CCAAN exhibit a certain degree of robustness to the pre-imputation algorithm, with CCAAN showing more instances of stable convergence. 
+
+Then, we analyzed the degree of improvement provided by the complete model and its variants across all experiments in terms of the pre-imputation algorithm (measured by the percentage reduction in MSE). Table \ref{tab:Quartile_improve} presents the statistical quantile information for the degree of improvement of these variants and the complete model. 
+\begin{table}[htbp]
+	\centering
+	\caption{Quartile of the percent improvement in MSE}
+	\label{tab:Quartile_improve}
+	\setlength{\tabcolsep}{4pt}
+	\begin{tabular}{ccccc}
+		\toprule
+		& CCA & VCA & CCAAN & VCAAN \\
+		\midrule
+		min & -120.35\% & -19.27\% & -61.14\% & -13.71\% \\
+		25\% & -19.45\% & 16.37\% & 8.79\% & 18.24\% \\
+		50\% & 5.38\% & 35.17\% & 21.01\% & 38.93\% \\
+		75\% & 31.62\% & 50.48\% & 40.07\% & 53.32\% \\
+		max & 71.96\% & 80.71\% & 76.04\% & 81.88\% \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+For the complete model, the median improvement percentage (38.40\%) and the 75th percentile (52.77\%) demonstrate that the model significantly reduces the MSE in most cases, with exceptional performance in some scenarios. However, the interquartile range (35.08\%) and the negative improvement percentage (-13.71\%) indicate that the model still exhibits a certain dependency on initial values in some cases, necessitating further optimization. And the corresponding kernel density plots are illustrated in Fig. \ref{fig:kdeplot}. Except for CCA, the kernel density curves of the other variant methods predominantly lie to the right of the reference line (positive region), indicating that these methods generally improve upon the original algorithm. The peak in the positive region is highest for CCAAN (green section), signifying its superior stability, which aligns with the earlier observation that it achieves stable convergence in more cases. For VCA and the complete model, their kernel density curves extend less into the left side of the reference line (negative region), and the high-density region of the complete model is notably highest. This suggests that the VCA effectively captures dynamic variations in the original data, and the inclusion of the CDN significantly enhances the imputation model's learning breadth.
+\begin{figure}[htbp]
+	\centering
+	\includegraphics[scale=.3]{fig_kdeplot}
+	\caption{Kernel density plot of the improved percentage of the model and its variants. }
+	\label{fig:kdeplot}
+\end{figure}
+
+\section{Discussion}\label{sec:Discussion}
+We proposed a novel hybrid method that combines statistical methods and deep learning to improve the imputation of PM2.5 spatiotemporal data in complex terrains and densely populated urban areas, addressing various missingness patterns and rates. Although the VAR model is a classic approach for multivariate time series analysis, it is not directly applicable due to the diversity and complexity of missing data scenarios in spatiotemporal settings \citep{sims1980macroeconomics, bashir2018handling}. Meanwhile, GANs, as a powerful deep generative modelling technique, face challenges in effectively capturing spatiotemporal patterns in missing values \citep{brimos2024deep, wang2022sta}. Integrating both approaches' strengths can largely improve the accuracy of imputation of the missing data. 
+
+The proposed method incorporates autoregression to capture the spatiotemporal dependencies of missing values, using B-spline functions to represent the dynamic coefficients. Inspired by GANs, we design a Convolutional Discriminator Network to distinguish between real and imputed values in the spatiotemporal data. Dynamic adversarial loss weight is introduced in the adversarial training process to adaptively adjust the weights of the generator and discriminator, effectively preventing overfitting. 
+
+Traditional imputation models typically require splitting the dataset into training and testing sets, which has two main drawbacks: first, it limits data utilization, especially when data is scarce, potentially impacting model performance; Second, for spatiotemporal data, the simple temporal or spatial split may lead to overfitting due to the complex dependencies between time and space dimensions. In contrast, the proposed model is trained directly on the observed data without splitting, fully utilizing all available information and avoiding information loss. By learning the overall distribution of spatiotemporal data directly from the observed data, the model can better capture spatiotemporal dependencies and achieve more accurate imputation. This approach simplifies the training process and significantly improves the model's robustness and practicality, making it particularly suitable for spatiotemporal data imputation tasks. 
+
+Extensive experiments demonstrate the remarkable potential of the proposed method. To validate effectiveness of our model,  five missing rates and five missingness patterns are considered in the experiments. Our model outperformed other methods under low, medium, and high missing rates (except for MNAR-low). For MCAR and MAR, our model is not sensitive to the initial imputation values and converges stably. However, under MNAR with medium and high missing rates, the model's performance is kind of sensitive to the initial values meaning that the model needs further improvement. For MIS and MIB, the former disrupts long-term temporal dependencies, while the latter preserves some local spatiotemporal information, allowing for more accurate imputation. Our model is less stable in the former scenario but significantly reduces imputation loss (up to 81.88\% in the upper quartile and 38.93\% in the median).
+
+The proposed method is crucial for repairing incomplete PM2.5 spatiotemporal data, subsequent exposure assessment, and health impact studies. 
+Besides its effectiveness in the current application, the proposed method is highly versatile. It can be readily extended to other spatiotemporal pollutant data such as NO2, SO2, and O3, as well as to other types of correlated multivariate time series. We recommend applying the method to offline spatiotemporal datasets with no more than 20 spatial monitoring stations and sampling intervals higher than 15 minutes (e.g., 15 minutes to 1 hour per observation), under which our experimental results demonstrated stable and reliable performance. 
+Despite the promising results, there is room for improvement in handling spatiotemporal data of large-scale sites and high missing rates under the MNAR mechanism. 
+In the future, we will incorporate additional contextual information (such as meteorological data and sensor status) and reduce the model's reliance on pre-estimation algorithms, aiming to better handle spatiotemporal data of large-scale sites and MNAR scenarios.
+
+\section*{CRediT authorship contribution statement}
+\textbf{Lingxiao Xiang:} Data curation, Methodology, Software, Visualization, Writing – original draft. 
+\textbf{Haitao Zheng:} Funding acquisition, Project administration, Supervision, Writing – review \& editing.
+
+\section*{Declaration of competing interest}
+The authors declare that they have no known competing financial interests or personal relationships that could have appeared to influence the work reported in this paper. 
+
+\section*{Declaration of generative AI in scientific writing}
+The authors only used DeepSeek to correct grammar and polish the language. After using this tool, the authors reviewed and edited the content as needed and take full responsibility for the content of the publication. The authors did not use any generative AI or AI-assisted technologies in the preparation of this manuscript. 
+
+\section*{Data availability}
+The data are available at the Beijing Municipal Environmental Monitoring Center and the open-source code can be accessed in the GitHub repository: \href{https://github.com/xlxsgit/Repository-for-VCAAN.git}{https://github.com/xlxsgit/Repository-for-VCAAN.git}. 
+
+\section*{Acknowledgments}
+This work was supported by the National Natural Science Foundation of China (NSFC, U24A20174) and the Fundamental Research Funds for the Central Universities, China (SWJTU, 2682021ZTPY078). 
+
+\bibliographystyle{elsarticle-harv}
+\bibliography{bibliography}
+
+\end{document}
+
+\endinput
+%%
+%% End of file `elsarticle-template-harv.tex'.
+
+

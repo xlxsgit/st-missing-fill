@@ -4,11 +4,11 @@
     "pi": 0.3,
     "best_hparams": {
         "d_model": 64,
-        "nhead": 2,
+        "nhead": 4,
         "num_layers": 2,
-        "l_lags": 1
+        "l_lags": 3
     },
-    "num_params": 208913,
+    "num_params": 209433,
     "epochs": 5,
     "batch_size": 64,
     "window_size": 144

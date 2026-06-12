@@ -5,10 +5,10 @@
     "best_hparams": {
         "d_model": 64,
         "nhead": 8,
-        "num_layers": 3,
-        "l_lags": 1
+        "num_layers": 1,
+        "l_lags": 3
     },
-    "num_params": 308881,
+    "num_params": 109465,
     "epochs": 5,
     "batch_size": 64,
     "window_size": 144
