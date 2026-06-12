@@ -13,7 +13,9 @@ docker/
 .dockerignore
 
 # 数据
-/data/
+data/*
+!data/processed/
+!data/processed/**
 docs/
 logs/
 notebooks/
